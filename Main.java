@@ -1,18 +1,18 @@
 /**
  * AHC048 - Mixing on the Palette 
  * 
- * 解法:３本混ぜ最もターゲットの色に近い色を作る
+ * 解法:２本混ぜ最もターゲットの色に近い色を作る
  * 1. 仕切りを全部下げて連結ウェルを1つにする
- * 2. 3本のチューブから色を混ぜて、ターゲットの色に最も近い色を作る
+ * 2. 2本のチューブから色を混ぜて、ターゲットの色に最も近い色を作る
  */
 
 import java.util.Scanner;
 
 public class Main {
-    static final int N = 20; // パレットのサイズ（20x20）
 
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
+        int N = sc.nextInt(); // パレットのサイズ
         int K = sc.nextInt(); // チューブの種類数
         int H = sc.nextInt(); // 作るべき色の数
         int T = sc.nextInt(); // 操作回数上限（未使用）
@@ -47,56 +47,40 @@ public class Main {
             System.out.println();
         }
 
-        // 各ターゲット色ごとに最適な3本混合を探索
+        // 各ターゲット色ごとに最適な2本混合を探索し、必ずH回「2 0 0」を出力
         for (int i = 0; i < H; i++) {
-            int bestA = 0, bestB = 0, bestC = 0; // 最適なチューブのインデックス
-            double bestX = 1.0, bestY = 0.0;     // 最適な混合比率（x, y, z=1-x-y）
-            double bestDist = Double.MAX_VALUE;   // 最小距離（色の誤差）
+            int bestA = 0, bestB = 0;
+            double bestX = 1.0; // bestAの比率
+            double bestDist = Double.MAX_VALUE;
 
-            // 3本のチューブの組み合わせ全探索
+            // 2本のチューブの組み合わせ全探索
             for (int a = 0; a < K; a++) {
                 for (int b = 0; b < K; b++) {
                     if (b == a) continue;
-                    for (int c = 0; c < K; c++) {
-                        if (c == a || c == b) continue;
-                        // x, y, zの混合比を0.05刻みで全探索
-                        for (double x = 0.0; x <= 1.0; x += 0.05) {
-                            for (double y = 0.0; y <= 1.0 - x; y += 0.05) {
-                                double z = 1.0 - x - y;
-                                if (z < -1e-8) continue; // zが負ならスキップ
-                                double[] mix = new double[3];
-                                // 混ぜた色を計算
-                                for (int d = 0; d < 3; d++) {
-                                    mix[d] = tubes[a][d] * x + tubes[b][d] * y + tubes[c][d] * z;
-                                }
-                                // ターゲット色との距離を計算
-                                double dist = colorDist(mix, targets[i]);
-                                // より近ければ記録
-                                if (dist < bestDist) {
-                                    bestDist = dist;
-                                    bestA = a;
-                                    bestB = b;
-                                    bestC = c;
-                                    bestX = x;
-                                    bestY = y;
-                                }
-                            }
+                    // x, (1-x)の混合比を0.05刻みで全探索
+                    for (double x = 0.0; x <= 1.0; x += 0.05) {
+                        double[] mix = new double[3];
+                        for (int d = 0; d < 3; d++) {
+                            mix[d] = tubes[a][d] * x + tubes[b][d] * (1.0 - x);
+                        }
+                        double dist = colorDist(mix, targets[i]);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            bestA = a;
+                            bestB = b;
+                            bestX = x;
                         }
                     }
                 }
             }
-            double z = 1.0 - bestX - bestY; // 3本目の比率
-            // それぞれの比率が十分大きければ注ぐ
+            double y = 1.0 - bestX;
             if (bestX > 1e-6) {
-                System.out.println("1 0 0 " + bestA); // bestAのチューブから1g注ぐ
+                System.out.println("1 0 0 " + bestA);
             }
-            if (bestY > 1e-6) {
-                System.out.println("1 0 0 " + bestB); // bestBのチューブから1g注ぐ
+            if (y > 1e-6) {
+                System.out.println("1 0 0 " + bestB);
             }
-            if (z > 1e-6) {
-                System.out.println("1 0 0 " + bestC); // bestCのチューブから1g注ぐ
-            }
-            System.out.println("2 0 0"); // 1g取り出して画伯に渡す
+            System.out.println("2 0 0");
         }
         sc.close();
     }
