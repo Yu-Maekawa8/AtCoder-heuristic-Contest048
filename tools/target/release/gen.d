@@ -1,0 +1,1 @@
+C:\Users\maedora\Desktop\AtCoder-heuristic-Contest048\tools\target\release\gen.exe: C:\Users\maedora\Desktop\AtCoder-heuristic-Contest048\tools\src\bin\gen.rs C:\Users\maedora\Desktop\AtCoder-heuristic-Contest048\tools\src\lib.rs
