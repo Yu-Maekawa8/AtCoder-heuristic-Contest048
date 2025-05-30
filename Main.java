@@ -1,3 +1,15 @@
+/**
+ * AHC048 - Mixing on the Palette 
+ * 
+ * 解法:３本混ぜ最もターゲットの色に近い色を作る
+ * 1. 仕切りを全部下げて連結ウェルを1つにする
+ * 2. 3本のチューブから色を混ぜて、ターゲットの色に最も近い色を作る
+ * 
+ * 
+ * 
+ */
+
+
 import java.util.Scanner;
 
 public class Main {
