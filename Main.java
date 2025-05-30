@@ -2,7 +2,7 @@
  * AHC048 - Mixing on the Palette 
  * 
  * 解法:２本混ぜ最もターゲットの色に近い色を作る
- * 1. 仕切りを全部下げて連結ウェルを1つにする
+ * 1. 4マス正方形（2x2）のウェルを作る
  * 2. 2本のチューブから色を混ぜて、ターゲットの色に最も近い色を作る
  */
 
@@ -31,17 +31,19 @@ public class Main {
             targets[i][2] = sc.nextDouble();
         }
 
-        // 仕切りをすべて下げて、パレット全体を1つの大きなウェルにする
+        // 4マス正方形（2x2）のウェルを作る仕切り配置
+        // 縦仕切り：2列ごとに仕切りを上げる
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < N - 1; j++) {
-                System.out.print("0");
+                System.out.print(((j + 1) % 2 == 0) ? "1" : "0");
                 if (j < N - 2) System.out.print(" ");
             }
             System.out.println();
         }
+        // 横仕切り：2行ごとに仕切りを上げる
         for (int i = 0; i < N - 1; i++) {
             for (int j = 0; j < N; j++) {
-                System.out.print("0");
+                System.out.print(((i + 1) % 2 == 0) ? "1" : "0");
                 if (j < N - 1) System.out.print(" ");
             }
             System.out.println();
