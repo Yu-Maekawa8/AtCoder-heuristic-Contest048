@@ -19,6 +19,7 @@
  * ・各ウェルの色（RGB）と残量（グラム数）を管理し、1g未満のウェルは使わないようにしています。
  * ・混合はマス単位で隣接判定し、正しく混ぜられるようにしています。
  * ・納品後や混合後のウェルの状態も正しく更新します。
+ * ・
  *
  * 【注意点】
  * ・動作1: 色を追加（追加注ぎ）、動作2: 納品、動作4: 混合（仕切りを外して混ぜる）を出力します。
@@ -99,62 +100,57 @@ public class Main {
         }
 
         // --- 各ターゲット色ごとに処理 ---
+        int prevWell = -1; // 直前に納品したウェル
+        int[] wellUsed = new int[wellCount]; // 各ウェルの使用回数（ローテーション用）
+
         for (int t = 0; t < H; t++) {
-            // 1. 全ウェルから最も近い色を探索（1g以上残っているもののみ）
-            int bestWell = -1;
-            double bestDist = Double.MAX_VALUE;
+            // 1. 全ウェル・全操作の全組み合わせで最小色差を探索
+            double minDist = Double.MAX_VALUE;
+            int opType = -1; // 0:そのまま納品, 1:追加注ぎ, 2:混合, 3:混合+追加注ぎ, 4:新規
+            int bestWell = -1, bestTube = -1;
+            int mixW1 = -1, mixW2 = -1, mixX1 = -1, mixY1 = -1, mixX2 = -1, mixY2 = -1;
+            double[] bestColor = new double[3];
+
+            // 既存ウェルそのまま納品
             for (int w = 0; w < wellCount; w++) {
-                if (wellGrams[w] < 1.0) continue; // 1g未満は使えない
-                double dist = colorDist(wellColors[w], targets[t]);
-                if (dist < bestDist) {
-                    bestDist = dist;
+                if (wellGrams[w] < 1.0) continue;
+                double penalty = (w == prevWell) ? 1.0 : 0.0;
+                penalty += 0.01 * wellUsed[w];
+                double dist = colorDist(wellColors[w], targets[t]) + penalty;
+                if (dist < minDist) {
+                    minDist = dist;
+                    opType = 0;
                     bestWell = w;
+                    for (int d = 0; d < 3; d++) bestColor[d] = wellColors[w][d];
                 }
             }
-            // 使えるウェルがない場合は空きウェルにチューブ0番を追加
-            if (bestWell == -1) {
-                for (int w = 0; w < wellCount; w++) {
-                    if (wellGrams[w] < 1e-8) {
-                        System.out.println("1 " + wellX[w] + " " + wellY[w] + " 0");
-                        for (int d = 0; d < 3; d++) wellColors[w][d] = tubes[0][d];
-                        wellGrams[w] = 1.0;
+
+            // 追加注ぎ（全ウェル・全チューブ）
+            for (int w = 0; w < wellCount; w++) {
+                if (wellGrams[w] < 1.0 || wellGrams[w] + 1.0 > wellSize * wellSize) continue;
+                for (int k = 0; k < K; k++) {
+                    double total = wellGrams[w] + 1.0;
+                    double[] mix = new double[3];
+                    for (int d = 0; d < 3; d++)
+                        mix[d] = (wellColors[w][d] * wellGrams[w] + tubes[k][d]) / total;
+                    double dist = colorDist(mix, targets[t]);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        opType = 1;
                         bestWell = w;
-                        break;
+                        bestTube = k;
+                        for (int d = 0; d < 3; d++) bestColor[d] = mix[d];
                     }
                 }
-                // それでも空きがなければスキップ
-                if (bestWell == -1) continue;
-                bestDist = colorDist(wellColors[bestWell], targets[t]);
-            }
-            int wx = wellX[bestWell];
-            int wy = wellY[bestWell];
-
-            // 2. 追加注ぎ・混合の組み合わせを全探索
-            // comboType: 0=そのまま, 1=追加注ぎ, 2=混合, 3=混合+追加注ぎ
-            double minComboDist = bestDist;
-            int comboType = 0;
-            int comboTube = -1;
-            int mixW1 = -1, mixW2 = -1, mixX1 = -1, mixY1 = -1, mixX2 = -1, mixY2 = -1;
-            double[] comboColor = new double[3];
-
-            // 追加注ぎのみ（bestWellに各チューブを追加した場合を全探索）
-            for (int k = 0; k < K; k++) {
-                double[] mix = new double[3];
-                for (int d = 0; d < 3; d++) mix[d] = (wellColors[bestWell][d] + tubes[k][d]) / 2.0;
-                double d2 = colorDist(mix, targets[t]);
-                if (d2 < minComboDist) {
-                    minComboDist = d2;
-                    comboType = 1;
-                    comboTube = k;
-                    for (int d = 0; d < 3; d++) comboColor[d] = mix[d];
-                }
             }
 
-            // 混合のみ or 混合+追加注ぎ（全ウェルペア・全チューブを全探索）
+            // 混合・混合＋追加注ぎ（全ウェルペア・全チューブ・全マス隣接）
             for (int w1 = 0; w1 < wellCount; w1++) {
                 if (wellGrams[w1] < 1.0) continue;
                 for (int w2 = 0; w2 < wellCount; w2++) {
                     if (w1 == w2 || wellGrams[w2] < 1.0) continue;
+                    double total = wellGrams[w1] + wellGrams[w2];
+                    if (total > wellSize * wellSize) continue;
                     for (int i1 = 0; i1 < wellSize; i1++) {
                         for (int j1 = 0; j1 < wellSize; j1++) {
                             int x1 = wellX[w1] + i1;
@@ -164,35 +160,35 @@ public class Main {
                                 int[] dy = {0, 1, 0, -1};
                                 int x2 = x1 + dx[dxy];
                                 int y2 = y1 + dy[dxy];
-                                // 隣接していなければスキップ
                                 if (x2 < 0 || x2 >= N || y2 < 0 || y2 >= N) continue;
                                 if (x2 >= wellX[w2] && x2 < wellX[w2] + wellSize &&
                                     y2 >= wellY[w2] && y2 < wellY[w2] + wellSize) {
-                                    // 混合のみ
+                                    // 混合
                                     double[] mix = new double[3];
                                     for (int d = 0; d < 3; d++)
-                                        mix[d] = (wellColors[w1][d] + wellColors[w2][d]) / 2.0;
-                                    double d2 = colorDist(mix, targets[t]);
-                                    if (d2 < minComboDist) {
-                                        minComboDist = d2;
-                                        comboType = 2;
+                                        mix[d] = (wellColors[w1][d] * wellGrams[w1] + wellColors[w2][d] * wellGrams[w2]) / total;
+                                    double dist = colorDist(mix, targets[t]);
+                                    if (dist < minDist) {
+                                        minDist = dist;
+                                        opType = 2;
                                         mixW1 = w1; mixW2 = w2;
                                         mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
-                                        for (int d = 0; d < 3; d++) comboColor[d] = mix[d];
+                                        for (int d = 0; d < 3; d++) bestColor[d] = mix[d];
                                     }
-                                    // 混合+追加注ぎ（混合後さらに各チューブを追加）
+                                    // 混合＋追加注ぎ
                                     for (int k = 0; k < K; k++) {
+                                        if (total + 1.0 > wellSize * wellSize) continue;
                                         double[] mixAdd = new double[3];
                                         for (int d = 0; d < 3; d++)
-                                            mixAdd[d] = (mix[d] + tubes[k][d]) / 2.0;
-                                        double d3 = colorDist(mixAdd, targets[t]);
-                                        if (d3 < minComboDist) {
-                                            minComboDist = d3;
-                                            comboType = 3;
-                                            comboTube = k;
+                                            mixAdd[d] = (mix[d] * total + tubes[k][d]) / (total + 1.0);
+                                        double dist2 = colorDist(mixAdd, targets[t]);
+                                        if (dist2 < minDist) {
+                                            minDist = dist2;
+                                            opType = 3;
+                                            bestTube = k;
                                             mixW1 = w1; mixW2 = w2;
                                             mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
-                                            for (int d = 0; d < 3; d++) comboColor[d] = mixAdd[d];
+                                            for (int d = 0; d < 3; d++) bestColor[d] = mixAdd[d];
                                         }
                                     }
                                 }
@@ -202,36 +198,75 @@ public class Main {
                 }
             }
 
-            // 3. 最良の操作を実行
-            if (comboType == 0) {
-                // そのまま納品
-                System.out.println("2 " + wx + " " + wy); // 動作2: 納品
+            // 新規色（空きウェル＋最も近いチューブ色）
+            int emptyWell = -1;
+            for (int w = 0; w < wellCount; w++) {
+                if (wellGrams[w] < 1e-8) {
+                    emptyWell = w;
+                    break;
+                }
+            }
+            if (emptyWell != -1) {
+                int bestTubeIdx = 0;
+                double bestTubeDist = Double.MAX_VALUE;
+                for (int k = 0; k < K; k++) {
+                    double d = colorDist(tubes[k], targets[t]);
+                    if (d < bestTubeDist) {
+                        bestTubeDist = d;
+                        bestTubeIdx = k;
+                    }
+                }
+                if (bestTubeDist < minDist) {
+                    minDist = bestTubeDist;
+                    opType = 4;
+                    bestWell = emptyWell;
+                    bestTube = bestTubeIdx;
+                    for (int d = 0; d < 3; d++) bestColor[d] = tubes[bestTubeIdx][d];
+                }
+            }
+
+            // 実行
+            if (opType == 0) {
+                System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
                 wellGrams[bestWell] -= 1.0;
-            } else if (comboType == 1) {
-                // 追加注ぎ
-                System.out.println("1 " + wx + " " + wy + " " + comboTube); // 動作1: 追加注ぎ
-                for (int d = 0; d < 3; d++) wellColors[bestWell][d] = comboColor[d];
-                System.out.println("2 " + wx + " " + wy); // 動作2: 納品
+                prevWell = bestWell;
+                wellUsed[bestWell]++;
+            } else if (opType == 1) {
+                System.out.println("1 " + wellX[bestWell] + " " + wellY[bestWell] + " " + bestTube);
+                for (int d = 0; d < 3; d++) wellColors[bestWell][d] = bestColor[d];
                 wellGrams[bestWell] += 1.0;
+                System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
                 wellGrams[bestWell] -= 1.0;
-            } else if (comboType == 2) {
-                // 混合
-                System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2); // 動作4: 混合
-                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = comboColor[d];
+                prevWell = bestWell;
+                wellUsed[bestWell]++;
+            } else if (opType == 2) {
+                System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
+                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
                 wellGrams[mixW1] += wellGrams[mixW2];
                 wellGrams[mixW2] = 0.0;
-                System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]); // 動作2: 納品
+                System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
                 wellGrams[mixW1] -= 1.0;
-            } else if (comboType == 3) {
-                // 混合＋追加注ぎ
-                System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2); // 動作4: 混合
-                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = comboColor[d];
+                prevWell = mixW1;
+                wellUsed[mixW1]++;
+            } else if (opType == 3) {
+                System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
+                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
                 wellGrams[mixW1] += wellGrams[mixW2];
                 wellGrams[mixW2] = 0.0;
-                System.out.println("1 " + wellX[mixW1] + " " + wellY[mixW1] + " " + comboTube); // 動作1: 追加注ぎ
+                System.out.println("1 " + wellX[mixW1] + " " + wellY[mixW1] + " " + bestTube);
                 wellGrams[mixW1] += 1.0;
-                System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]); // 動作2: 納品
+                System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
                 wellGrams[mixW1] -= 1.0;
+                prevWell = mixW1;
+                wellUsed[mixW1]++;
+            } else if (opType == 4) {
+                System.out.println("1 " + wellX[bestWell] + " " + wellY[bestWell] + " " + bestTube);
+                for (int d = 0; d < 3; d++) wellColors[bestWell][d] = bestColor[d];
+                wellGrams[bestWell] = 1.0;
+                System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
+                wellGrams[bestWell] -= 1.0;
+                prevWell = bestWell;
+                wellUsed[bestWell]++;
             }
         }
         sc.close();
