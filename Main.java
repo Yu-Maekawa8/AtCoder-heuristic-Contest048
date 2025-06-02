@@ -1,32 +1,7 @@
 /**
  * AHC048 - Mixing on the Palette
- *
- * このプログラムは、20×20のパレットを5×5のウェル（小部屋、各4×4マス）に分割し、
- * 各ウェルに絵の具（チューブ色）を1gずつ初期配置した後、ターゲット色に近い色を作って納品する問題の解法です。
- *
- * 【全体の流れ】
- * 1. パレットの仕切りを出力し、5×5のウェル構造を作る。
- * 2. 各ウェルにチューブ色を順番に1gずつ入れる（初期化）。
- * 3. 各ターゲット色ごとに、以下の操作を最適な組み合わせで選択し納品する：
- *    - そのまま納品（既存ウェルの色が近い場合）
- *    - 追加注ぎ（既存ウェルにチューブ色を加えて混ぜる）
- *    - 混合（隣接する2つのウェルを混ぜる）
- *    - 混合＋追加注ぎ（混合後さらにチューブ色を加えて混ぜる）
- *    - 使えるウェルがない場合は空きウェルに新たに色を追加
- *
- * 【工夫点】
- * ・納品・追加注ぎ・混合・混合＋追加注ぎの全組み合わせを全探索し、ターゲット色に最も近づく操作を選択します。
- * ・各ウェルの色（RGB）と残量（グラム数）を管理し、1g未満のウェルは使わないようにしています。
- * ・混合はマス単位で隣接判定し、正しく混ぜられるようにしています。
- * ・納品後や混合後のウェルの状態も正しく更新します。
- * ・
- *
- * 【注意点】
- * ・動作1: 色を追加（追加注ぎ）、動作2: 納品、動作4: 混合（仕切りを外して混ぜる）を出力します。
- * ・動作3（破棄）は本実装では使用していません。
- * ・最大ターン数TやコストDは本実装では未使用です。
+ * 混合・混合＋追加注ぎ・仕切り出し入れ＋追加注ぎの強化＆RGBユークリッド色差
  */
-
 import java.util.Scanner;
 
 public class Main {
@@ -55,15 +30,13 @@ public class Main {
         }
 
         // --- パレットを5×5のウェルに分割（wellSize=4, N=20で25個） ---
-        int wellSize = 4; // 1ウェルの一辺の長さ
+        int wellSize = 3; // 1ウェルの一辺の長さ
         int wellsPerRow = N / wellSize; // 1行あたりのウェル数（5）
         int wellCount = wellsPerRow * wellsPerRow; // 全ウェル数（25）
 
         // --- 仕切り出力（5×5分割）---
-        // 各マスの間に仕切りを出力（動作0/1）
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < N - 1; j++) {
-                // 4,8,12,16列目に仕切り
                 System.out.print(((j + 1) % wellSize == 0) ? "1" : "0");
                 if (j < N - 2) System.out.print(" ");
             }
@@ -71,7 +44,6 @@ public class Main {
         }
         for (int i = 0; i < N - 1; i++) {
             for (int j = 0; j < N; j++) {
-                // 4,8,12,16行目に仕切り
                 System.out.print(((i + 1) % wellSize == 0) ? "1" : "0");
                 if (j < N - 1) System.out.print(" ");
             }
@@ -84,29 +56,26 @@ public class Main {
         int[] wellY = new int[wellCount]; // 各ウェルの左上y座標
         double[] wellGrams = new double[wellCount]; // 各ウェルのグラム数
         int idx = 0;
-        // 各ウェルに初期色（チューブ色を順番に）を1gずつ入れる
         for (int wy = 0; wy < wellsPerRow; wy++) {
             for (int wx = 0; wx < wellsPerRow; wx++) {
                 int x = wx * wellSize;
                 int y = wy * wellSize;
-                int tubeIdx = idx % K; // チューブ色を順番に割り当て
-                System.out.println("1 " + x + " " + y + " " + tubeIdx); // 動作1: 色を入れる
+                int tubeIdx = idx % K;
+                System.out.println("1 " + x + " " + y + " " + tubeIdx);
                 for (int d = 0; d < 3; d++) wellColors[idx][d] = tubes[tubeIdx][d];
                 wellX[idx] = x;
                 wellY[idx] = y;
-                wellGrams[idx] = 1.0; // 1g入れる
+                wellGrams[idx] = 1.0;
                 idx++;
             }
         }
 
-        // --- 各ターゲット色ごとに処理 ---
-        int prevWell = -1; // 直前に納品したウェル
-        int[] wellUsed = new int[wellCount]; // 各ウェルの使用回数（ローテーション用）
+        int prevWell = -1;
+        int[] wellUsed = new int[wellCount];
 
         for (int t = 0; t < H; t++) {
-            // 1. 全ウェル・全操作の全組み合わせで最小色差を探索
             double minDist = Double.MAX_VALUE;
-            int opType = -1; // 0:そのまま納品, 1:追加注ぎ, 2:混合, 3:混合+追加注ぎ, 4:新規
+            int opType = -1;
             int bestWell = -1, bestTube = -1;
             int mixW1 = -1, mixW2 = -1, mixX1 = -1, mixY1 = -1, mixX2 = -1, mixY2 = -1;
             double[] bestColor = new double[3];
@@ -144,7 +113,7 @@ public class Main {
                 }
             }
 
-            // 混合・混合＋追加注ぎ（全ウェルペア・全チューブ・全マス隣接）
+            // --- 混合・混合＋追加注ぎ・仕切り出し入れ＋追加注ぎ 強化 ---
             for (int w1 = 0; w1 < wellCount; w1++) {
                 if (wellGrams[w1] < 1.0) continue;
                 for (int w2 = 0; w2 < wellCount; w2++) {
@@ -155,14 +124,11 @@ public class Main {
                         for (int j1 = 0; j1 < wellSize; j1++) {
                             int x1 = wellX[w1] + i1;
                             int y1 = wellY[w1] + j1;
-                            for (int dxy = 0; dxy < 4; dxy++) {
-                                int[] dx = {1, 0, -1, 0};
-                                int[] dy = {0, 1, 0, -1};
-                                int x2 = x1 + dx[dxy];
-                                int y2 = y1 + dy[dxy];
-                                if (x2 < 0 || x2 >= N || y2 < 0 || y2 >= N) continue;
-                                if (x2 >= wellX[w2] && x2 < wellX[w2] + wellSize &&
-                                    y2 >= wellY[w2] && y2 < wellY[w2] + wellSize) {
+                            for (int i2 = 0; i2 < wellSize; i2++) {
+                                for (int j2 = 0; j2 < wellSize; j2++) {
+                                    int x2 = wellX[w2] + i2;
+                                    int y2 = wellY[w2] + j2;
+                                    if (Math.abs(x1 - x2) + Math.abs(y1 - y2) != 1) continue; // 隣接のみ
                                     // 混合
                                     double[] mix = new double[3];
                                     for (int d = 0; d < 3; d++)
@@ -189,6 +155,24 @@ public class Main {
                                             mixW1 = w1; mixW2 = w2;
                                             mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
                                             for (int d = 0; d < 3; d++) bestColor[d] = mixAdd[d];
+                                        }
+                                    }
+                                    // 仕切り出し入れ＋追加注ぎ（混合せず、隣接ウェルに追加注ぎ）
+                                    if (wellGrams[w2] + 1.0 <= wellSize * wellSize) {
+                                        for (int k = 0; k < K; k++) {
+                                            double total2 = wellGrams[w2] + 1.0;
+                                            double[] addMix = new double[3];
+                                            for (int d = 0; d < 3; d++)
+                                                addMix[d] = (wellColors[w2][d] * wellGrams[w2] + tubes[k][d]) / total2;
+                                            double dist3 = colorDist(addMix, targets[t]);
+                                            if (dist3 < minDist) {
+                                                minDist = dist3;
+                                                opType = 5; // 新しい操作タイプ
+                                                bestWell = w2;
+                                                bestTube = k;
+                                                mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
+                                                for (int d = 0; d < 3; d++) bestColor[d] = addMix[d];
+                                            }
                                         }
                                     }
                                 }
@@ -267,21 +251,26 @@ public class Main {
                 wellGrams[bestWell] -= 1.0;
                 prevWell = bestWell;
                 wellUsed[bestWell]++;
+            } else if (opType == 5) {
+                // 仕切り出し入れ＋追加注ぎ
+                System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
+                System.out.println("1 " + wellX[bestWell] + " " + wellY[bestWell] + " " + bestTube);
+                for (int d = 0; d < 3; d++) wellColors[bestWell][d] = bestColor[d];
+                wellGrams[bestWell] += 1.0;
+                System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
+                wellGrams[bestWell] -= 1.0;
+                prevWell = bestWell;
+                wellUsed[bestWell]++;
             }
         }
         sc.close();
     }
 
-    /**
-     * 2色間のユークリッド距離を返す（色差の計算）
-     * @param c1 色1（RGB配列）
-     * @param c2 色2（RGB配列）
-     * @return ユークリッド距離
-     */
+    // --- RGBユークリッド距離での色差計算 ---
     static double colorDist(double[] c1, double[] c2) {
-        double dc = c1[0] - c2[0];
-        double dm = c1[1] - c2[1];
-        double dy = c1[2] - c2[2];
-        return Math.sqrt(dc * dc + dm * dm + dy * dy);
+        double dr = c1[0] - c2[0];
+        double dg = c1[1] - c2[1];
+        double db = c1[2] - c2[2];
+        return Math.sqrt(dr * dr + dg * dg + db * db);
     }
 }
