@@ -283,7 +283,7 @@ public class Main {
         return Math.sqrt(dr * dr + dg * dg + db * db);
     }
 
-    int getWellIndex(int x, int y, int wellSize, int wellsPerRow) {
+    static int getWellIndex(int x, int y, int wellSize, int wellsPerRow) {
         int wx = x / wellSize;
         int wy = y / wellSize;
         return wy * wellsPerRow + wx;
