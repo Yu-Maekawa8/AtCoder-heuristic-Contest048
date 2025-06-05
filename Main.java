@@ -20,6 +20,8 @@
 import java.util.Scanner;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Queue;
+import java.util.ArrayDeque;
 
 public class Main {
 
@@ -273,8 +275,14 @@ public class Main {
             if (removedWallCount > 0) {
                 removedWallCount--;
                 int[] wall = removedWalls[removedWallCount];
-                System.out.println("4 " + wall[0] + " " + wall[1] + " " + wall[2] + " " + wall[3]);
-                // 必要ならここで色・グラムの分割処理も
+                int w1 = getWellIndex(wall[0], wall[1], wellSize, wellsPerRow);
+                int w2 = getWellIndex(wall[2], wall[3], wellSize, wellsPerRow);
+                if (uf.getSize(w1) >= 2) {
+                    System.out.println("4 " + wall[0] + " " + wall[1] + " " + wall[2] + " " + wall[3]);
+                    // 分離処理
+                    uf.separate(w1, w2, wellsPerRow); // wellsPerRowを渡す
+                    // 必要ならここで色・グラムの分割処理も
+                }
             }
 
             // 追加注ぎ・混合・納品などでwellColorGramsを更新した後、必ず現在の色も再計算
@@ -309,15 +317,21 @@ public class Main {
         return wy * wellsPerRow + wx;
     }
 
-    // --- Union-Find構造体 ---
+    // --- Union-Find構造体（分離対応） ---
     static class UnionFind {
         int[] parent, size;
+        // 分離用：各ノードの履歴管理
+        List<Integer>[] groupMembers;
+
         UnionFind(int n) {
             parent = new int[n];
             size = new int[n];
+            groupMembers = new ArrayList[n];
             for (int i = 0; i < n; i++) {
                 parent[i] = i;
                 size[i] = 1;
+                groupMembers[i] = new ArrayList<>();
+                groupMembers[i].add(i);
             }
         }
         int find(int x) {
@@ -330,9 +344,13 @@ public class Main {
             if (size[rx] < size[ry]) {
                 parent[rx] = ry;
                 size[ry] += size[rx];
+                groupMembers[ry].addAll(groupMembers[rx]);
+                groupMembers[rx].clear();
             } else {
                 parent[ry] = rx;
                 size[rx] += size[ry];
+                groupMembers[rx].addAll(groupMembers[ry]);
+                groupMembers[ry].clear();
             }
         }
         boolean same(int x, int y) {
@@ -340,6 +358,65 @@ public class Main {
         }
         int getSize(int x) {
             return size[find(x)];
+        }
+        // 分離（xとyの間の結合を解除し、x側とy側を分割する）
+        void separate(int x, int y, int wellsPerRow) {
+            int rx = find(x);
+            if (find(y) != rx) return; // もともと別グループ
+            // x, yが同じグループのときのみ分離
+            // x側とy側の連結成分をBFSで分ける
+            int n = parent.length;
+            boolean[] visited = new boolean[n];
+            List<Integer> groupX = new ArrayList<>();
+            List<Integer> groupY = new ArrayList<>();
+            // x側
+            Queue<Integer> q = new ArrayDeque<>();
+            q.add(x);
+            visited[x] = true;
+            while (!q.isEmpty()) {
+                int v = q.poll();
+                groupX.add(v);
+                for (int u : getAdjacentWells(v, wellsPerRow)) {
+                    if (!visited[u] && same(u, x) && !((v == x && u == y) || (v == y && u == x))) {
+                        visited[u] = true;
+                        q.add(u);
+                    }
+                }
+            }
+            // y側
+            for (int v : groupMembers[rx]) {
+                if (!visited[v]) groupY.add(v);
+            }
+            // 新しいグループを作る
+            for (int v : groupY) {
+                parent[v] = v;
+                size[v] = 1;
+                groupMembers[v].clear();
+                groupMembers[v].add(v);
+            }
+            // x側の親とサイズを再計算
+            for (int v : groupX) {
+                parent[v] = x;
+            }
+            size[x] = groupX.size();
+            groupMembers[x].clear();
+            groupMembers[x].addAll(groupX);
+        }
+        // 隣接ウェルのインデックスを返す
+        List<Integer> getAdjacentWells(int w, int wellsPerRow) {
+            List<Integer> res = new ArrayList<>();
+            int[] dx = {1, -1, 0, 0};
+            int[] dy = {0, 0, 1, -1};
+            int wx = w % wellsPerRow;
+            int wy = w / wellsPerRow;
+            for (int d = 0; d < 4; d++) {
+                int nx = wx + dx[d];
+                int ny = wy + dy[d];
+                if (0 <= nx && nx < wellsPerRow && 0 <= ny && ny < wellsPerRow) {
+                    res.add(ny * wellsPerRow + nx);
+                }
+            }
+            return res;
         }
     }
 }
