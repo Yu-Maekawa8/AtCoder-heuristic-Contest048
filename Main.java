@@ -27,33 +27,84 @@ public class Main {
 
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
-        int N = sc.nextInt(); // パレットの一辺(20 固定)
-        int K = sc.nextInt(); // 絵の具の種類数
-        int H = sc.nextInt(); // ターゲット色の数(1000 固定)
-        int T = sc.nextInt(); // 最大ターン数（未使用）
-        int D = sc.nextInt(); // 1グラム出すコストD（未使用）
+        int N = sc.nextInt();
+        int K = sc.nextInt();
+        int H = sc.nextInt();
+        int T = sc.nextInt();
+        int D = sc.nextInt();
 
-        // 絵の具の色（各RGB成分）を読み込み
+        double[][] tubes = readTubes(sc, K);
+        double[][] targets = readTargets(sc, H);
+
+        int wellSize = 3;
+        int wellsPerRow = N / wellSize;
+        int wellCount = wellsPerRow * wellsPerRow;
+
+        printInitialWalls(N, wellSize);
+
+        double[][] wellColors = new double[wellCount][3];
+        int[] wellX = new int[wellCount];
+        int[] wellY = new int[wellCount];
+        double[] wellGrams = new double[wellCount];
+        initializeWells(wellColors, wellX, wellY, wellGrams, tubes, K, wellSize, wellsPerRow);
+
+        int prevWell = -1;
+        int[] wellUsed = new int[wellCount];
+        int[][] removedWalls = new int[H * 4][4];
+        int removedWallCount = 0;
+        double[][] wellColorGrams = new double[wellCount][K];
+        double[][] wellCurrentColor = new double[wellCount][3];
+        initializeWellColorGrams(wellColorGrams, wellCurrentColor, tubes, K, wellCount);
+
+        UnionFind uf = new UnionFind(wellCount);
+
+        for (int t = 0; t < H; t++) {
+            OperationResult op = selectOperation(
+                wellColors, wellGrams, wellUsed, prevWell, tubes, targets[t], K, wellSize, wellsPerRow, wellX, wellY, uf, t, H, wellCount
+            );
+            prevWell = executeOperation(op, wellColors, wellGrams, wellUsed, wellX, wellY);
+
+            if (removedWallCount > 0) {
+                removedWallCount--;
+                int[] wall = removedWalls[removedWallCount];
+                int w1 = getWellIndex(wall[0], wall[1], wellSize, wellsPerRow);
+                int w2 = getWellIndex(wall[2], wall[3], wellSize, wellsPerRow);
+                if (uf.getSize(w1) >= 2) {
+                    System.out.println("4 " + wall[0] + " " + wall[1] + " " + wall[2] + " " + wall[3]);
+                    uf.separate(w1, w2, wellsPerRow);
+                }
+            }
+
+            updateWellCurrentColor(wellColorGrams, wellCurrentColor, tubes, K, wellCount);
+
+            if (t % 500 == 0) {
+                separateLargeGroups(uf, wellCount, wellsPerRow, wellX, wellY);
+            }
+        }
+        sc.close();
+    }
+
+    static double[][] readTubes(Scanner sc, int K) {
         double[][] tubes = new double[K][3];
         for (int i = 0; i < K; i++) {
             tubes[i][0] = sc.nextDouble();
             tubes[i][1] = sc.nextDouble();
             tubes[i][2] = sc.nextDouble();
         }
-        // ターゲット色を読み込み
+        return tubes;
+    }
+
+    static double[][] readTargets(Scanner sc, int H) {
         double[][] targets = new double[H][3];
         for (int i = 0; i < H; i++) {
             targets[i][0] = sc.nextDouble();
             targets[i][1] = sc.nextDouble();
             targets[i][2] = sc.nextDouble();
         }
+        return targets;
+    }
 
-        // --- パレットを5×5のウェルに分割（wellSize=4, N=20で25個） ---
-        int wellSize = 3; // 1ウェルの一辺の長さ
-        int wellsPerRow = N / wellSize; // 1行あたりのウェル数（5）
-        int wellCount = wellsPerRow * wellsPerRow; // 全ウェル数（25）
-
-        // --- 仕切り出力（5×5分割）---
+    static void printInitialWalls(int N, int wellSize) {
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < N - 1; j++) {
                 System.out.print(((j + 1) % wellSize == 0) ? "1" : "0");
@@ -68,12 +119,9 @@ public class Main {
             }
             System.out.println();
         }
+    }
 
-        // --- 各ウェルの初期化 ---
-        double[][] wellColors = new double[wellCount][3]; // 各ウェルの色（RGB）
-        int[] wellX = new int[wellCount]; // 各ウェルの左上x座標
-        int[] wellY = new int[wellCount]; // 各ウェルの左上y座標
-        double[] wellGrams = new double[wellCount]; // 各ウェルのグラム数
+    static void initializeWells(double[][] wellColors, int[] wellX, int[] wellY, double[] wellGrams, double[][] tubes, int K, int wellSize, int wellsPerRow) {
         int idx = 0;
         for (int wy = 0; wy < wellsPerRow; wy++) {
             for (int wx = 0; wx < wellsPerRow; wx++) {
@@ -88,116 +136,149 @@ public class Main {
                 idx++;
             }
         }
+    }
 
-        int prevWell = -1;
-        int[] wellUsed = new int[wellCount];
-
-        // --- 仕切りを外した座標を管理する配列を用意 ---
-        int[][] removedWalls = new int[H * 4][4]; // 混合が多い場合に備えて大きめに
-        int removedWallCount = 0;
-
-        // --- 各ウェルの色ごとのg数を格納する配列を用意 ---
-        double[][] wellColorGrams = new double[wellCount][K]; // [ウェル][チューブ色]
-        // --- 各ウェルの現在の色（RGB）も格納 ---
-        double[][] wellCurrentColor = new double[wellCount][3]; // [ウェル][RGB]
-
-        // 初期化（最初に1gだけ入れる）
+    static void initializeWellColorGrams(double[][] wellColorGrams, double[][] wellCurrentColor, double[][] tubes, int K, int wellCount) {
         for (int w = 0; w < wellCount; w++) {
             int tubeIdx = w % K;
             wellColorGrams[w][tubeIdx] = 1.0;
             for (int d = 0; d < 3; d++) wellCurrentColor[w][d] = tubes[tubeIdx][d];
         }
+    }
 
-        UnionFind uf = new UnionFind(wellCount);
-
-        for (int t = 0; t < H; t++) {
-            double minDist = Double.MAX_VALUE;
-            int opType = -1;
-            int bestWell = -1, bestTube = -1;
-            int mixW1 = -1, mixW2 = -1, mixX1 = -1, mixY1 = -1, mixX2 = -1, mixY2 = -1;
-            double[] bestColor = new double[3];
-
-            // 既存ウェルそのまま納品
-            for (int w = 0; w < wellCount; w++) {
-                if (wellGrams[w] < 1.0) continue; // 1グラム未満のウェルは使用不可
-                double penalty = (w == prevWell) ? 1.0 : 0.0; // 前回と同じウェルを使用する場合のペナルティ
-                penalty += 0.02 * wellUsed[w]; // 使用回数が多いウェルにペナルティ（均等使用を促進）
-                double dist = colorDist(wellColors[w], targets[t]) + penalty;
-                if (dist < minDist) {
-                    minDist = dist;
-                    opType = 0;
-                    bestWell = w;
-                    for (int d = 0; d < 3; d++) bestColor[d] = wellColors[w][d];
+    static void updateWellCurrentColor(double[][] wellColorGrams, double[][] wellCurrentColor, double[][] tubes, int K, int wellCount) {
+        for (int w = 0; w < wellCount; w++) {
+            double total = 0.0;
+            for (int k = 0; k < K; k++) total += wellColorGrams[w][k];
+            if (total > 1e-8) {
+                for (int d = 0; d < 3; d++) {
+                    double sum = 0.0;
+                    for (int k = 0; k < K; k++) sum += tubes[k][d] * wellColorGrams[w][k];
+                    wellCurrentColor[w][d] = sum / total;
                 }
+            } else {
+                for (int d = 0; d < 3; d++) wellCurrentColor[w][d] = 0.0;
             }
+        }
+    }
 
-            // 追加注ぎ（全ウェル・全チューブ）
-            for (int w = 0; w < wellCount; w++) {
-                if (wellGrams[w] < 1.0 || wellGrams[w] + 1.0 > wellSize * wellSize) continue; // 容量チェック
-                for (int k = 0; k < K; k++) {
-                    double total = wellGrams[w] + 1.0;
-                    double[] mix = new double[3];
-                    for (int d = 0; d < 3; d++)
-                        mix[d] = (wellColors[w][d] * wellGrams[w] + tubes[k][d]) / total; // 重み付き平均で色を計算
-                    double dist = colorDist(mix, targets[t]);
-                    if (dist < minDist) {
-                        minDist = dist;
-                        opType = 1;
-                        bestWell = w;
-                        bestTube = k;
-                        for (int d = 0; d < 3; d++) bestColor[d] = mix[d];
+    static void separateLargeGroups(UnionFind uf, int wellCount, int wellsPerRow, int[] wellX, int[] wellY) {
+        boolean[] checked = new boolean[wellCount];
+        for (int w = 0; w < wellCount; w++) {
+            int root = uf.find(w);
+            if (checked[root]) continue;
+            checked[root] = true;
+            int groupSize = uf.getSize(w);
+            if (groupSize >= 3) {
+                List<Integer> group = uf.groupMembers[root];
+                outer:
+                for (int i = 0; i < group.size(); i++) {
+                    int wi = group.get(i);
+                    for (int j = i + 1; j < group.size(); j++) {
+                        int wj = group.get(j);
+                        for (int adj : uf.getAdjacentWells(wi, wellsPerRow)) {
+                            if (adj == wj) {
+                                int x1 = wellX[wi], y1 = wellY[wi];
+                                int x2 = wellX[wj], y2 = wellY[wj];
+                                System.out.println("4 " + x1 + " " + y1 + " " + x2 + " " + y2);
+                                uf.separate(wi, wj, wellsPerRow);
+                                break outer;
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
 
-            // 混合・混合＋追加注ぎ
-            for (int w1 = 0; w1 < wellCount; w1++) {
-                if (wellGrams[w1] < 1.0) continue; // 1グラム未満のウェルは使用不可
-                for (int w2 = 0; w2 < wellCount; w2++) {
-                    if (w1 == w2 || wellGrams[w2] < 1.0) continue; // 同じウェルは使用不可
-                    double total = wellGrams[w1] + wellGrams[w2];
-                    if (total > wellSize * wellSize) continue; // 容量チェック
+    static OperationResult selectOperation(
+        double[][] wellColors, double[] wellGrams, int[] wellUsed, int prevWell,
+        double[][] tubes, double[] target, int K, int wellSize, int wellsPerRow,
+        int[] wellX, int[] wellY, UnionFind uf, int t, int H, int wellCount
+    ) {
+        double minDist = Double.MAX_VALUE;
+        int opType = -1;
+        int bestWell = -1, bestTube = -1;
+        int mixW1 = -1, mixW2 = -1, mixX1 = -1, mixY1 = -1, mixX2 = -1, mixY2 = -1;
+        double[] bestColor = new double[3];
 
-                    // 隣接するウェルのみを考慮（効率的な混合のため）
-                    boolean isAdjacent = false;
-                    for (int i1 = 0; i1 < wellSize && !isAdjacent; i1++) {
-                        for (int j1 = 0; j1 < wellSize && !isAdjacent; j1++) {
-                            int x1 = wellX[w1] + i1;
-                            int y1 = wellY[w1] + j1;
-                            for (int i2 = 0; i2 < wellSize && !isAdjacent; i2++) {
-                                for (int j2 = 0; j2 < wellSize && !isAdjacent; j2++) {
-                                    int x2 = wellX[w2] + i2;
-                                    int y2 = wellY[w2] + j2;
-                                    if (Math.abs(x1 - x2) + Math.abs(y1 - y2) == 1) { // 隣接判定
-                                        isAdjacent = true;
-                                        // 混合
-                                        double[] mix = new double[3];
+        // 既存ウェルそのまま納品
+        for (int w = 0; w < wellCount; w++) {
+            if (wellGrams[w] < 1.0) continue;
+            double penalty = (w == prevWell) ? 1.0 : 0.0;
+            penalty += 0.02 * wellUsed[w];
+            double dist = colorDist(wellColors[w], target) + penalty; // 修正
+            if (dist < minDist) {
+                minDist = dist;
+                opType = 0;
+                bestWell = w;
+                for (int d = 0; d < 3; d++) bestColor[d] = wellColors[w][d];
+            }
+        }
+
+        // 追加注ぎ（全ウェル・全チューブ）
+        for (int w = 0; w < wellCount; w++) {
+            if (wellGrams[w] < 1.0 || wellGrams[w] + 1.0 > wellSize * wellSize) continue;
+            for (int k = 0; k < K; k++) {
+                double total = wellGrams[w] + 1.0;
+                double[] mix = new double[3];
+                for (int d = 0; d < 3; d++)
+                    mix[d] = (wellColors[w][d] * wellGrams[w] + tubes[k][d]) / total;
+                double dist = colorDist(mix, target); // 修正
+                if (dist < minDist) {
+                    minDist = dist;
+                    opType = 1;
+                    bestWell = w;
+                    bestTube = k;
+                    for (int d = 0; d < 3; d++) bestColor[d] = mix[d];
+                }
+            }
+        }
+
+        // 混合・混合＋追加注ぎ
+        for (int w1 = 0; w1 < wellCount; w1++) {
+            if (wellGrams[w1] < 1.0) continue;
+            for (int w2 = 0; w2 < wellCount; w2++) {
+                if (w1 == w2 || wellGrams[w2] < 1.0) continue;
+                double total = wellGrams[w1] + wellGrams[w2];
+                if (total > wellSize * wellSize) continue;
+
+                boolean isAdjacent = false;
+                for (int i1 = 0; i1 < wellSize && !isAdjacent; i1++) {
+                    for (int j1 = 0; j1 < wellSize && !isAdjacent; j1++) {
+                        int x1 = wellX[w1] + i1;
+                        int y1 = wellY[w1] + j1;
+                        for (int i2 = 0; i2 < wellSize && !isAdjacent; i2++) {
+                            for (int j2 = 0; j2 < wellSize && !isAdjacent; j2++) {
+                                int x2 = wellX[w2] + i2;
+                                int y2 = wellY[w2] + j2;
+                                if (Math.abs(x1 - x2) + Math.abs(y1 - y2) == 1) {
+                                    isAdjacent = true;
+                                    double[] mix = new double[3];
+                                    for (int d = 0; d < 3; d++)
+                                        mix[d] = (wellColors[w1][d] * wellGrams[w1] + wellColors[w2][d] * wellGrams[w2]) / total;
+                                    double dist = colorDist(mix, target); // 修正
+                                    if (dist < minDist) {
+                                        minDist = dist;
+                                        opType = 2;
+                                        mixW1 = w1; mixW2 = w2;
+                                        mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
+                                        for (int d = 0; d < 3; d++) bestColor[d] = mix[d];
+                                    }
+
+                                    for (int k = 0; k < K; k++) {
+                                        if (total + 1.0 > wellSize * wellSize) continue;
+                                        double[] mixAdd = new double[3];
                                         for (int d = 0; d < 3; d++)
-                                            mix[d] = (wellColors[w1][d] * wellGrams[w1] + wellColors[w2][d] * wellGrams[w2]) / total;
-                                        double dist = colorDist(mix, targets[t]);
-                                        if (dist < minDist) {
-                                            minDist = dist;
-                                            opType = 2;
+                                            mixAdd[d] = (mix[d] * total + tubes[k][d]) / (total + 1.0);
+                                        double dist2 = colorDist(mixAdd, target); // 修正
+                                        if (dist2 < minDist) {
+                                            minDist = dist2;
+                                            opType = 3;
+                                            bestTube = k;
                                             mixW1 = w1; mixW2 = w2;
                                             mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
-                                            for (int d = 0; d < 3; d++) bestColor[d] = mix[d];
-                                        }
-
-                                        // 混合＋追加注ぎ
-                                        for (int k = 0; k < K; k++) {
-                                            if (total + 1.0 > wellSize * wellSize) continue; // 容量チェック
-                                            double[] mixAdd = new double[3];
-                                            for (int d = 0; d < 3; d++)
-                                                mixAdd[d] = (mix[d] * total + tubes[k][d]) / (total + 1.0);
-                                            double dist2 = colorDist(mixAdd, targets[t]);
-                                            if (dist2 < minDist) {
-                                                minDist = dist2;
-                                                opType = 3;
-                                                bestTube = k;
-                                                mixW1 = w1; mixW2 = w2;
-                                                mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
-                                                for (int d = 0; d < 3; d++) bestColor[d] = mixAdd[d];
-                                            }
+                                            for (int d = 0; d < 3; d++) bestColor[d] = mixAdd[d];
                                         }
                                     }
                                 }
@@ -206,104 +287,79 @@ public class Main {
                     }
                 }
             }
+        }
 
-            // 空きウェルの活用（他の操作が失敗した場合のフォールバック）
-            if (opType == -1) {
-                for (int w = 0; w < wellCount; w++) {
-                    if (wellGrams[w] < 1e-8) { // 空きウェルを探す
-                        int bestTubeIdx = 0;
-                        double bestTubeDist = Double.MAX_VALUE;
-                        for (int k = 0; k < K; k++) {
-                            double d = colorDist(tubes[k], targets[t]);
-                            if (d < bestTubeDist) {
-                                bestTubeDist = d;
-                                bestTubeIdx = k;
-                            }
-                        }
-                        if (bestTubeDist < minDist) {
-                            minDist = bestTubeDist;
-                            opType = 1;
-                            bestWell = w;
-                            bestTube = bestTubeIdx;
-                            for (int d = 0; d < 3; d++) bestColor[d] = tubes[bestTubeIdx][d];
-                        }
-                    }
-                }
-            }
-
-            // 操作の実行
-            if (opType == 0) {
-                // そのまま納品
-                System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
-                wellGrams[bestWell] -= 1.0;
-                prevWell = bestWell;
-                wellUsed[bestWell]++;
-            } else if (opType == 1) {
-                // 追加注ぎ
-                System.out.println("1 " + wellX[bestWell] + " " + wellY[bestWell] + " " + bestTube);
-                for (int d = 0; d < 3; d++) wellColors[bestWell][d] = bestColor[d];
-                wellGrams[bestWell] += 1.0;
-                System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
-                wellGrams[bestWell] -= 1.0;
-                prevWell = bestWell;
-                wellUsed[bestWell]++;
-            } else if (opType == 2) {
-                // 混合
-                System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
-                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
-                wellGrams[mixW1] += wellGrams[mixW2];
-                wellGrams[mixW2] = 0.0;
-                System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
-                wellGrams[mixW1] -= 1.0;
-                prevWell = mixW1;
-                wellUsed[mixW1]++;
-            } else if (opType == 3) {
-                // 混合＋追加注ぎ
-                System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
-                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
-                wellGrams[mixW1] += wellGrams[mixW2];
-                wellGrams[mixW2] = 0.0;
-                System.out.println("1 " + wellX[mixW1] + " " + wellY[mixW1] + " " + bestTube);
-                wellGrams[mixW1] += 1.0;
-                System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
-                wellGrams[mixW1] -= 1.0;
-                prevWell = mixW1;
-                wellUsed[mixW1]++;
-            }
-
-            // 納品後や仕切りを戻すとき
-            if (removedWallCount > 0) {
-                removedWallCount--;
-                int[] wall = removedWalls[removedWallCount];
-                int w1 = getWellIndex(wall[0], wall[1], wellSize, wellsPerRow);
-                int w2 = getWellIndex(wall[2], wall[3], wellSize, wellsPerRow);
-                if (uf.getSize(w1) >= 2) {
-                    System.out.println("4 " + wall[0] + " " + wall[1] + " " + wall[2] + " " + wall[3]);
-                    // 分離処理
-                    uf.separate(w1, w2, wellsPerRow); // wellsPerRowを渡す
-                    // 必要ならここで色・グラムの分割処理も
-                }
-            }
-
-            // 追加注ぎ・混合・納品などでwellColorGramsを更新した後、必ず現在の色も再計算
+        // 空きウェルの活用
+        if (opType == -1) {
             for (int w = 0; w < wellCount; w++) {
-                double total = 0.0;
-                for (int k = 0; k < K; k++) total += wellColorGrams[w][k];
-                if (total > 1e-8) {
-                    for (int d = 0; d < 3; d++) {
-                        double sum = 0.0;
-                        for (int k = 0; k < K; k++) sum += tubes[k][d] * wellColorGrams[w][k];
-                        wellCurrentColor[w][d] = sum / total;
+                if (wellGrams[w] < 1e-8) {
+                    int bestTubeIdx = 0;
+                    double bestTubeDist = Double.MAX_VALUE;
+                    for (int k = 0; k < K; k++) {
+                        double d = colorDist(tubes[k], target); // 修正
+                        if (d < bestTubeDist) {
+                            bestTubeDist = d;
+                            bestTubeIdx = k;
+                        }
                     }
-                } else {
-                    for (int d = 0; d < 3; d++) wellCurrentColor[w][d] = 0.0;
+                    if (bestTubeDist < minDist) {
+                        minDist = bestTubeDist;
+                        opType = 1;
+                        bestWell = w;
+                        bestTube = bestTubeIdx;
+                        for (int d = 0; d < 3; d++) bestColor[d] = tubes[bestTubeIdx][d];
+                    }
                 }
             }
         }
-        sc.close();
+
+        return new OperationResult(opType, bestWell, bestTube, mixW1, mixW2, mixX1, mixY1, mixX2, mixY2, bestColor);
     }
 
-    // --- RGBユークリッド距離での色差計算 ---
+    static int executeOperation(OperationResult op, double[][] wellColors, double[] wellGrams, int[] wellUsed, int[] wellX, int[] wellY) {
+        int prevWell = -1;
+        // 操作の実行
+        if (op.opType == 0) {
+            // そのまま納品
+            System.out.println("2 " + wellX[op.bestWell] + " " + wellY[op.bestWell]);
+            wellGrams[op.bestWell] -= 1.0;
+            prevWell = op.bestWell;
+            wellUsed[op.bestWell]++;
+        } else if (op.opType == 1) {
+            // 追加注ぎ
+            System.out.println("1 " + wellX[op.bestWell] + " " + wellY[op.bestWell] + " " + op.bestTube);
+            for (int d = 0; d < 3; d++) wellColors[op.bestWell][d] = op.bestColor[d];
+            wellGrams[op.bestWell] += 1.0;
+            System.out.println("2 " + wellX[op.bestWell] + " " + wellY[op.bestWell]);
+            wellGrams[op.bestWell] -= 1.0;
+            prevWell = op.bestWell;
+            wellUsed[op.bestWell]++;
+        } else if (op.opType == 2) {
+            // 混合
+            System.out.println("4 " + op.mixX1 + " " + op.mixY1 + " " + op.mixX2 + " " + op.mixY2);
+            for (int d = 0; d < 3; d++) wellColors[op.mixW1][d] = op.bestColor[d];
+            wellGrams[op.mixW1] += wellGrams[op.mixW2];
+            wellGrams[op.mixW2] = 0.0;
+            System.out.println("2 " + wellX[op.mixW1] + " " + wellY[op.mixW1]);
+            wellGrams[op.mixW1] -= 1.0;
+            prevWell = op.mixW1;
+            wellUsed[op.mixW1]++;
+        } else if (op.opType == 3) {
+            // 混合＋追加注ぎ
+            System.out.println("4 " + op.mixX1 + " " + op.mixY1 + " " + op.mixX2 + " " + op.mixY2);
+            for (int d = 0; d < 3; d++) wellColors[op.mixW1][d] = op.bestColor[d];
+            wellGrams[op.mixW1] += wellGrams[op.mixW2];
+            wellGrams[op.mixW2] = 0.0;
+            System.out.println("1 " + wellX[op.mixW1] + " " + wellY[op.mixW1] + " " + op.bestTube);
+            wellGrams[op.mixW1] += 1.0;
+            System.out.println("2 " + wellX[op.mixW1] + " " + wellY[op.mixW1]);
+            wellGrams[op.mixW1] -= 1.0;
+            prevWell = op.mixW1;
+            wellUsed[op.mixW1]++;
+        }
+        return prevWell;
+    }
+
     static double colorDist(double[] c1, double[] c2) {
         double dr = c1[0] - c2[0];
         double dg = c1[1] - c2[1];
@@ -317,10 +373,27 @@ public class Main {
         return wy * wellsPerRow + wx;
     }
 
+    // --- 操作結果をまとめるクラス ---
+    static class OperationResult {
+        int opType, bestWell, bestTube, mixW1, mixW2, mixX1, mixY1, mixX2, mixY2;
+        double[] bestColor;
+        OperationResult(int opType, int bestWell, int bestTube, int mixW1, int mixW2, int mixX1, int mixY1, int mixX2, int mixY2, double[] bestColor) {
+            this.opType = opType;
+            this.bestWell = bestWell;
+            this.bestTube = bestTube;
+            this.mixW1 = mixW1;
+            this.mixW2 = mixW2;
+            this.mixX1 = mixX1;
+            this.mixY1 = mixY1;
+            this.mixX2 = mixX2;
+            this.mixY2 = mixY2;
+            this.bestColor = bestColor;
+        }
+    }
+
     // --- Union-Find構造体（分離対応） ---
     static class UnionFind {
         int[] parent, size;
-        // 分離用：各ノードの履歴管理
         List<Integer>[] groupMembers;
 
         UnionFind(int n) {
@@ -359,17 +432,13 @@ public class Main {
         int getSize(int x) {
             return size[find(x)];
         }
-        // 分離（xとyの間の結合を解除し、x側とy側を分割する）
         void separate(int x, int y, int wellsPerRow) {
             int rx = find(x);
-            if (find(y) != rx) return; // もともと別グループ
-            // x, yが同じグループのときのみ分離
-            // x側とy側の連結成分をBFSで分ける
+            if (find(y) != rx) return;
             int n = parent.length;
             boolean[] visited = new boolean[n];
             List<Integer> groupX = new ArrayList<>();
             List<Integer> groupY = new ArrayList<>();
-            // x側
             Queue<Integer> q = new ArrayDeque<>();
             q.add(x);
             visited[x] = true;
@@ -383,18 +452,15 @@ public class Main {
                     }
                 }
             }
-            // y側
             for (int v : groupMembers[rx]) {
                 if (!visited[v]) groupY.add(v);
             }
-            // 新しいグループを作る
             for (int v : groupY) {
                 parent[v] = v;
                 size[v] = 1;
                 groupMembers[v].clear();
                 groupMembers[v].add(v);
             }
-            // x側の親とサイズを再計算
             for (int v : groupX) {
                 parent[v] = x;
             }
@@ -402,7 +468,6 @@ public class Main {
             groupMembers[x].clear();
             groupMembers[x].addAll(groupX);
         }
-        // 隣接ウェルのインデックスを返す
         List<Integer> getAdjacentWells(int w, int wellsPerRow) {
             List<Integer> res = new ArrayList<>();
             int[] dx = {1, -1, 0, 0};
