@@ -96,12 +96,17 @@ public class Main {
 
         // --- 各ウェルの色ごとのg数を格納する配列を用意 ---
         double[][] wellColorGrams = new double[wellCount][K]; // [ウェル][チューブ色]
+        // --- 各ウェルの現在の色（RGB）も格納 ---
+        double[][] wellCurrentColor = new double[wellCount][3]; // [ウェル][RGB]
 
         // 初期化（最初に1gだけ入れる）
         for (int w = 0; w < wellCount; w++) {
             int tubeIdx = w % K;
             wellColorGrams[w][tubeIdx] = 1.0;
+            for (int d = 0; d < 3; d++) wellCurrentColor[w][d] = tubes[tubeIdx][d];
         }
+
+        UnionFind uf = new UnionFind(wellCount);
 
         for (int t = 0; t < H; t++) {
             double minDist = Double.MAX_VALUE;
@@ -271,6 +276,21 @@ public class Main {
                 System.out.println("4 " + wall[0] + " " + wall[1] + " " + wall[2] + " " + wall[3]);
                 // 必要ならここで色・グラムの分割処理も
             }
+
+            // 追加注ぎ・混合・納品などでwellColorGramsを更新した後、必ず現在の色も再計算
+            for (int w = 0; w < wellCount; w++) {
+                double total = 0.0;
+                for (int k = 0; k < K; k++) total += wellColorGrams[w][k];
+                if (total > 1e-8) {
+                    for (int d = 0; d < 3; d++) {
+                        double sum = 0.0;
+                        for (int k = 0; k < K; k++) sum += tubes[k][d] * wellColorGrams[w][k];
+                        wellCurrentColor[w][d] = sum / total;
+                    }
+                } else {
+                    for (int d = 0; d < 3; d++) wellCurrentColor[w][d] = 0.0;
+                }
+            }
         }
         sc.close();
     }
@@ -287,5 +307,39 @@ public class Main {
         int wx = x / wellSize;
         int wy = y / wellSize;
         return wy * wellsPerRow + wx;
+    }
+
+    // --- Union-Find構造体 ---
+    static class UnionFind {
+        int[] parent, size;
+        UnionFind(int n) {
+            parent = new int[n];
+            size = new int[n];
+            for (int i = 0; i < n; i++) {
+                parent[i] = i;
+                size[i] = 1;
+            }
+        }
+        int find(int x) {
+            if (parent[x] == x) return x;
+            return parent[x] = find(parent[x]);
+        }
+        void unite(int x, int y) {
+            int rx = find(x), ry = find(y);
+            if (rx == ry) return;
+            if (size[rx] < size[ry]) {
+                parent[rx] = ry;
+                size[ry] += size[rx];
+            } else {
+                parent[ry] = rx;
+                size[rx] += size[ry];
+            }
+        }
+        boolean same(int x, int y) {
+            return find(x) == find(y);
+        }
+        int getSize(int x) {
+            return size[find(x)];
+        }
     }
 }
