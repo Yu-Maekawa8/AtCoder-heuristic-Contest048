@@ -51,40 +51,18 @@ public class Main {
         int wellsPerRow = N / wellSize; // 1行あたりのウェル数（5）
         int wellCount = wellsPerRow * wellsPerRow; // 全ウェル数（25）
 
-        // --- 仕切り状態を管理する配列 ---
-        // verticalWalls[x][y] はピクセル(x,y)と(x+1,y)の間の垂直仕切り
-        boolean[][] verticalWalls = new boolean[N - 1][N];
-        // horizontalWalls[x][y] はピクセル(x,y)と(x,y+1)の間の水平仕切り
-        boolean[][] horizontalWalls = new boolean[N][N - 1];
-
-        // 初期仕切り状態を設定
-        for (int y = 0; y < N; y++) {
-            for (int x = 0; x < N - 1; x++) {
-                if (((x + 1) % wellSize == 0)) {
-                    verticalWalls[x][y] = true;
-                }
-            }
-        }
-        for (int y = 0; y < N - 1; y++) {
-            for (int x = 0; x < N; x++) {
-                if (((y + 1) % wellSize == 0)) {
-                    horizontalWalls[x][y] = true;
-                }
-            }
-        }
-
-        // --- 仕切り出力（初期状態）---
-        for (int y = 0; y < N; y++) {
-            for (int x = 0; x < N - 1; x++) {
-                System.out.print(verticalWalls[x][y] ? "1" : "0");
-                if (x < N - 2) System.out.print(" ");
+        // --- 仕切り出力（5×5分割）---
+        for (int i = 0; i < N; i++) {
+            for (int j = 0; j < N - 1; j++) {
+                System.out.print(((j + 1) % wellSize == 0) ? "1" : "0");
+                if (j < N - 2) System.out.print(" ");
             }
             System.out.println();
         }
-        for (int y = 0; y < N - 1; y++) {
-            for (int x = 0; x < N; x++) {
-                System.out.print(horizontalWalls[x][y] ? "1" : "0");
-                if (x < N - 1) System.out.print(" ");
+        for (int i = 0; i < N - 1; i++) {
+            for (int j = 0; j < N; j++) {
+                System.out.print(((i + 1) % wellSize == 0) ? "1" : "0");
+                if (j < N - 1) System.out.print(" ");
             }
             System.out.println();
         }
@@ -112,6 +90,10 @@ public class Main {
         int prevWell = -1;
         int[] wellUsed = new int[wellCount];
 
+        // --- 仕切りを外した座標を管理する配列を用意 ---
+        int[][] removedWalls = new int[H * 4][4]; // 混合が多い場合に備えて大きめに
+        int removedWallCount = 0;
+
         for (int t = 0; t < H; t++) {
             double minDist = Double.MAX_VALUE;
             int opType = -1;
@@ -134,14 +116,13 @@ public class Main {
             }
 
             // 追加注ぎ（全ウェル・全チューブ）
-            // 1g未満のウェルも対象にする
             for (int w = 0; w < wellCount; w++) {
-                if (wellGrams[w] < 1e-8 || wellGrams[w] + 1.0 > wellSize * wellSize) continue; // 0gは後で処理、容量チェック
+                if (wellGrams[w] < 1.0 || wellGrams[w] + 1.0 > wellSize * wellSize) continue; // 容量チェック
                 for (int k = 0; k < K; k++) {
                     double total = wellGrams[w] + 1.0;
                     double[] mix = new double[3];
                     for (int d = 0; d < 3; d++)
-                        mix[d] = (wellColors[w][d] * wellGrams[w] + tubes[k][d]) / total;
+                        mix[d] = (wellColors[w][d] * wellGrams[w] + tubes[k][d]) / total; // 重み付き平均で色を計算
                     double dist = colorDist(mix, targets[t]);
                     if (dist < minDist) {
                         minDist = dist;
@@ -165,13 +146,13 @@ public class Main {
                     boolean isAdjacent = false;
                     for (int i1 = 0; i1 < wellSize && !isAdjacent; i1++) {
                         for (int j1 = 0; j1 < wellSize && !isAdjacent; j1++) {
-                            int x1_pixel = wellX[w1] + i1;
-                            int y1_pixel = wellY[w1] + j1;
+                            int x1 = wellX[w1] + i1;
+                            int y1 = wellY[w1] + j1;
                             for (int i2 = 0; i2 < wellSize && !isAdjacent; i2++) {
                                 for (int j2 = 0; j2 < wellSize && !isAdjacent; j2++) {
-                                    int x2_pixel = wellX[w2] + i2;
-                                    int y2_pixel = wellY[w2] + j2;
-                                    if (Math.abs(x1_pixel - x2_pixel) + Math.abs(y1_pixel - y2_pixel) == 1) { // 隣接判定
+                                    int x2 = wellX[w2] + i2;
+                                    int y2 = wellY[w2] + j2;
+                                    if (Math.abs(x1 - x2) + Math.abs(y1 - y2) == 1) { // 隣接判定
                                         isAdjacent = true;
                                         // 混合
                                         double[] mix = new double[3];
@@ -182,24 +163,24 @@ public class Main {
                                             minDist = dist;
                                             opType = 2;
                                             mixW1 = w1; mixW2 = w2;
-                                            mixX1 = x1_pixel; mixY1 = y1_pixel; mixX2 = x2_pixel; mixY2 = y2_pixel;
+                                            mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
                                             for (int d = 0; d < 3; d++) bestColor[d] = mix[d];
                                         }
 
                                         // 混合＋追加注ぎ
-                                        for (int k_tube = 0; k_tube < K; k_tube++) {
+                                        for (int k = 0; k < K; k++) {
                                             if (total + 1.0 > wellSize * wellSize) continue; // 容量チェック
                                             double[] mixAdd = new double[3];
-                                            for (int d_rgb = 0; d_rgb < 3; d_rgb++)
-                                                mixAdd[d_rgb] = (mix[d_rgb] * total + tubes[k_tube][d_rgb]) / (total + 1.0);
+                                            for (int d = 0; d < 3; d++)
+                                                mixAdd[d] = (mix[d] * total + tubes[k][d]) / (total + 1.0);
                                             double dist2 = colorDist(mixAdd, targets[t]);
                                             if (dist2 < minDist) {
                                                 minDist = dist2;
                                                 opType = 3;
-                                                bestTube = k_tube;
+                                                bestTube = k;
                                                 mixW1 = w1; mixW2 = w2;
-                                                mixX1 = x1_pixel; mixY1 = y1_pixel; mixX2 = x2_pixel; mixY2 = y2_pixel;
-                                                for (int d_rgb = 0; d_rgb < 3; d_rgb++) bestColor[d_rgb] = mixAdd[d_rgb];
+                                                mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
+                                                for (int d = 0; d < 3; d++) bestColor[d] = mixAdd[d];
                                             }
                                         }
                                     }
@@ -252,149 +233,34 @@ public class Main {
                 wellUsed[bestWell]++;
             } else if (opType == 2) {
                 // 混合
-                // 外す仕切りの座標を特定し、状態を更新
-                int wallX = -1, wallY = -1; // 外した仕切りの座標
-                boolean isVerticalWall = false;
-                if (mixY1 == mixY2) { // 同じ行 -> 垂直仕切り
-                    wallX = Math.min(mixX1, mixX2);
-                    wallY = mixY1;
-                    verticalWalls[wallX][wallY] = false;
-                    isVerticalWall = true;
-                } else { // 同じ列 -> 水平仕切り
-                    wallX = mixX1;
-                    wallY = Math.min(mixY1, mixY2);
-                    horizontalWalls[wallX][wallY] = false;
-                    isVerticalWall = false;
-                }
                 System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
-
                 for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
                 wellGrams[mixW1] += wellGrams[mixW2];
-                double originalW2Grams = wellGrams[mixW2]; // 元のw2のグラム数を保持（仕切りを戻す際に使用）
                 wellGrams[mixW2] = 0.0;
-
                 System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
                 wellGrams[mixW1] -= 1.0;
                 prevWell = mixW1;
                 wellUsed[mixW1]++;
-
-                System.err.println("[DEBUG opType 2] Before wall return check - Turn: " + t + ", wellGrams[mixW1]: " + wellGrams[mixW1] + ", wellCapacity: " + (wellSize * wellSize));
-                // --- 仕切りを戻す処理 ---
-                // 残ったグラム数がウェル容量の半分未満で、かつ操作回数に余裕がある場合
-                if (wellGrams[mixW1] < (double)(wellSize * wellSize) / 2.0 && wellGrams[mixW1] >= 0.0 && t < H - 20 ) { // 条件変更
-                    System.err.println("[DEBUG] Attempting to return wall for opType 2. Turn: " + t);
-                    System.err.println("  - mixW1: " + mixW1 + ", mixW2: " + mixW2);
-                    System.err.println("  - Pixels: (" + mixX1 + "," + mixY1 + ") <-> (" + mixX2 + "," + mixY2 + ")");
-                    System.err.println("  - isVerticalWall: " + isVerticalWall + ", wallX: " + wallX + ", wallY: " + wallY);
-                    System.err.println("  - wellGrams[mixW1] (before split): " + wellGrams[mixW1]);
-                    System.err.println("  - originalW2Grams: " + originalW2Grams);
-
-                    System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
-                    if (isVerticalWall) {
-                        verticalWalls[wallX][wallY] = true;
-                    } else {
-                        horizontalWalls[wallX][wallY] = true;
-                    }
-                    // 絵の具を分割して戻す (例: 半分ずつ)
-                    // ただし、元のw2が空だった場合はw1に全て残す
-                    if (originalW2Grams > 1e-8) { // 元のw2に絵の具があった場合
-                        double remainingGrams = wellGrams[mixW1];
-                        if (remainingGrams >= 0.0) { // 0以上の場合のみ分割
-                           wellGrams[mixW1] = remainingGrams / 2.0;
-                           wellGrams[mixW2] = remainingGrams / 2.0;
-                           // 色もw2に戻す
-                           for (int d = 0; d < 3; d++) {
-                               wellColors[mixW2][d] = wellColors[mixW1][d];
-                           }
-                           System.err.println("  - Split successful. wellGrams[mixW1]: " + wellGrams[mixW1] + ", wellGrams[mixW2]: " + wellGrams[mixW2]);
-                        } else {
-                           System.err.println("  - Split skipped: remainingGrams < 0");
-                        }
-                    } else {
-                        System.err.println("  - Split skipped: originalW2Grams was ~0.");
-                    }
-                }
-
             } else if (opType == 3) {
                 // 混合＋追加注ぎ
-                // 外す仕切りの座標を特定し、状態を更新
-                int wallX = -1, wallY = -1; // 外した仕切りの座標
-                boolean isVerticalWall = false;
-                if (mixY1 == mixY2) { // 同じ行 -> 垂直仕切り
-                    wallX = Math.min(mixX1, mixX2);
-                    wallY = mixY1;
-                    verticalWalls[wallX][wallY] = false;
-                    isVerticalWall = true;
-                } else { // 同じ列 -> 水平仕切り
-                    wallX = mixX1;
-                    wallY = Math.min(mixY1, mixY2);
-                    horizontalWalls[wallX][wallY] = false;
-                    isVerticalWall = false;
-                }
                 System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
-
-                // 混合による色とグラムの更新
-                double currentW1Grams = wellGrams[mixW1]; // 混合前のw1のグラム数
-                double currentW2Grams = wellGrams[mixW2]; // 混合前のw2のグラム数
-                double mixedTotalGrams = currentW1Grams + currentW2Grams;
-                double[] tempMixedColor = new double[3]; // bestColorを上書きしないように一時変数を使用
-                for (int d = 0; d < 3; d++) {
-                     tempMixedColor[d] = (wellColors[mixW1][d] * currentW1Grams + wellColors[mixW2][d] * currentW2Grams) / mixedTotalGrams;
-                }
-
-                wellGrams[mixW1] = mixedTotalGrams;
-                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = tempMixedColor[d]; // 混合後の色をw1に設定
-                double originalW2GramsForRestore = currentW2Grams; // 元のw2のグラム数を保持
+                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
+                wellGrams[mixW1] += wellGrams[mixW2];
                 wellGrams[mixW2] = 0.0;
-
-                // 追加注ぎの処理
                 System.out.println("1 " + wellX[mixW1] + " " + wellY[mixW1] + " " + bestTube);
-                // bestColorは「混合後に追加注ぎした後の理想の色」
-                // wellColors[mixW1]とwellGrams[mixW1]を更新
-                double gramsBeforeAddingTube = wellGrams[mixW1];
-                for (int d = 0; d < 3; d++) {
-                    wellColors[mixW1][d] = (wellColors[mixW1][d] * gramsBeforeAddingTube + tubes[bestTube][d] * 1.0) / (gramsBeforeAddingTube + 1.0);
-                }
                 wellGrams[mixW1] += 1.0;
-
-
                 System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
                 wellGrams[mixW1] -= 1.0;
                 prevWell = mixW1;
                 wellUsed[mixW1]++;
+            }
 
-                System.err.println("[DEBUG opType 3] Before wall return check - Turn: " + t + ", wellGrams[mixW1]: " + wellGrams[mixW1] + ", wellCapacity: " + (wellSize * wellSize));
-                // --- 仕切りを戻す処理 ---
-                if (wellGrams[mixW1] < (double)(wellSize * wellSize) / 2.0 && wellGrams[mixW1] >= 0.0 && t < H - 20) { // 条件変更
-                    System.err.println("[DEBUG] Attempting to return wall for opType 3. Turn: " + t);
-                    System.err.println("  - mixW1: " + mixW1 + ", mixW2: " + mixW2);
-                    System.err.println("  - Pixels: (" + mixX1 + "," + mixY1 + ") <-> (" + mixX2 + "," + mixY2 + ")");
-                    System.err.println("  - isVerticalWall: " + isVerticalWall + ", wallX: " + wallX + ", wallY: " + wallY);
-                    System.err.println("  - wellGrams[mixW1] (before split): " + wellGrams[mixW1]);
-                    System.err.println("  - originalW2GramsForRestore: " + originalW2GramsForRestore);
-
-                    System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
-                    if (isVerticalWall) {
-                        verticalWalls[wallX][wallY] = true;
-                    } else {
-                        horizontalWalls[wallX][wallY] = true;
-                    }
-                    if (originalW2GramsForRestore > 1e-8) {
-                        double remainingGrams = wellGrams[mixW1];
-                        if (remainingGrams >= 0.0) {
-                            wellGrams[mixW1] = remainingGrams / 2.0;
-                            wellGrams[mixW2] = remainingGrams / 2.0;
-                            for (int d = 0; d < 3; d++) {
-                                wellColors[mixW2][d] = wellColors[mixW1][d];
-                            }
-                            System.err.println("  - Split successful. wellGrams[mixW1]: " + wellGrams[mixW1] + ", wellGrams[mixW2]: " + wellGrams[mixW2]);
-                        } else {
-                            System.err.println("  - Split skipped: remainingGrams < 0");
-                        }
-                    } else {
-                        System.err.println("  - Split skipped: originalW2GramsForRestore was ~0.");
-                    }
-                }
+            // 納品後や仕切りを戻すとき
+            if (removedWallCount > 0) {
+                removedWallCount--;
+                int[] wall = removedWalls[removedWallCount];
+                System.out.println("4 " + wall[0] + " " + wall[1] + " " + wall[2] + " " + wall[3]);
+                // 必要ならここで色・グラムの分割処理も
             }
         }
         sc.close();
