@@ -94,6 +94,15 @@ public class Main {
         int[][] removedWalls = new int[H * 4][4]; // 混合が多い場合に備えて大きめに
         int removedWallCount = 0;
 
+        // --- 各ウェルの色ごとのg数を格納する配列を用意 ---
+        double[][] wellColorGrams = new double[wellCount][K]; // [ウェル][チューブ色]
+
+        // 初期化（最初に1gだけ入れる）
+        for (int w = 0; w < wellCount; w++) {
+            int tubeIdx = w % K;
+            wellColorGrams[w][tubeIdx] = 1.0;
+        }
+
         for (int t = 0; t < H; t++) {
             double minDist = Double.MAX_VALUE;
             int opType = -1;
@@ -272,5 +281,11 @@ public class Main {
         double dg = c1[1] - c2[1];
         double db = c1[2] - c2[2];
         return Math.sqrt(dr * dr + dg * dg + db * db);
+    }
+
+    int getWellIndex(int x, int y, int wellSize, int wellsPerRow) {
+        int wx = x / wellSize;
+        int wy = y / wellSize;
+        return wy * wellsPerRow + wx;
     }
 }
