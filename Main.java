@@ -23,6 +23,18 @@ import java.util.ArrayList;
 import java.util.Queue;
 import java.util.ArrayDeque;
 
+// --- チューニング用パラメータここから ---
+private static final double PREV_WELL_PENALTY = 1.0; // 前回使用ウェルへのペナルティ
+private static final double WELL_USED_PENALTY_FACTOR = 0.02; // ウェル使用回数ペナルティ
+private static final int SEPARATE_GROUPS_FREQUENCY = 500; // 大グループ分離頻度
+private static final double MIN_GRAMS_THRESHOLD = 1e-8; // g数の最小判定閾値
+private static final int WALL_INSERT_INTERVAL = 150; // 仕切りを入れる間隔
+private static final int WALL_INSERT_MIN_GROUP_SIZE = 3; // 仕切りを入れる最小グループサイズ
+// --- チューニング用パラメータここまで ---
+
+// 基礎色ウェル管理
+private static boolean[] isBaseColorWell;
+
 public class Main {
 
     public static void main(String[] args) {
@@ -39,6 +51,9 @@ public class Main {
         int wellSize = 3;
         int wellsPerRow = N / wellSize;
         int wellCount = wellsPerRow * wellsPerRow;
+
+        // isBaseColorWell配列を初期化
+        isBaseColorWell = new boolean[wellCount];
 
         printInitialWalls(N, wellSize);
 
@@ -77,7 +92,7 @@ public class Main {
 
             updateWellCurrentColor(wellColorGrams, wellCurrentColor, tubes, K, wellCount);
 
-            if (t % 500 == 0) {
+            if (t % SEPARATE_GROUPS_FREQUENCY == 0) {
                 separateLargeGroups(uf, wellCount, wellsPerRow, wellX, wellY);
             }
         }
