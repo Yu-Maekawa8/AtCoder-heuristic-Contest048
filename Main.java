@@ -23,19 +23,18 @@ import java.util.ArrayList;
 import java.util.Queue;
 import java.util.ArrayDeque;
 
-// --- チューニング用パラメータここから ---
-private static final double PREV_WELL_PENALTY = 1.0; // 前回使用ウェルへのペナルティ
-private static final double WELL_USED_PENALTY_FACTOR = 0.02; // ウェル使用回数ペナルティ
-private static final int SEPARATE_GROUPS_FREQUENCY = 500; // 大グループ分離頻度
-private static final double MIN_GRAMS_THRESHOLD = 1e-8; // g数の最小判定閾値
-private static final int WALL_INSERT_INTERVAL = 150; // 仕切りを入れる間隔
-private static final int WALL_INSERT_MIN_GROUP_SIZE = 3; // 仕切りを入れる最小グループサイズ
-// --- チューニング用パラメータここまで ---
-
-// 基礎色ウェル管理
-private static boolean[] isBaseColorWell;
-
 public class Main {
+
+    // --- チューニング用パラメータここから ---
+    private static final double PREV_WELL_PENALTY = 1.0; // 前回使用ウェルへのペナルティ
+    private static final double WELL_USED_PENALTY_FACTOR = 0.02; // ウェル使用回数ペナルティ
+    private static final int SEPARATE_GROUPS_FREQUENCY = 500; // 大グループ分離頻度
+    private static final int WALL_INSERT_INTERVAL = 150; // 仕切りを入れる間隔
+    private static final int WALL_INSERT_MIN_GROUP_SIZE = 3; // 仕切りを入れる最小グループサイズ
+    // --- チューニング用パラメータここまで ---
+
+    // 基礎色ウェル管理
+    private static boolean[] isBaseColorWell;
 
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
@@ -220,8 +219,8 @@ public class Main {
         // 既存ウェルそのまま納品
         for (int w = 0; w < wellCount; w++) {
             if (wellGrams[w] < 1.0) continue;
-            double penalty = (w == prevWell) ? 1.0 : 0.0;
-            penalty += 0.02 * wellUsed[w];
+            double penalty = (w == prevWell) ? PREV_WELL_PENALTY : 0.0;
+            penalty += WELL_USED_PENALTY_FACTOR * wellUsed[w];
             double dist = colorDist(wellColors[w], target) + penalty; // 修正
             if (dist < minDist) {
                 minDist = dist;
