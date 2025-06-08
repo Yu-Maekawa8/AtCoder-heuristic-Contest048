@@ -1,22 +1,35 @@
+/**
+ * AHC048 - Mixing on the Palette
+ * 実装方針：
+ * 1. 基本的な操作の最適化
+ *    - そのまま納品：使用回数の重み付けで均等使用を促進
+ *    - 追加注ぎ：容量チェックを厳密に行い、重み付き平均で色を計算
+ *    - 混合：隣接するウェルのみを考慮し、効率的な混合を実現
+ *    - 混合＋追加注ぎ：混合後の色をさらに改善
+ * 
+ * 2. ウェル使用の効率化
+ *    - 空きウェルの積極的な活用
+ *    - 使用回数に基づくペナルティで均等使用を促進
+ *    - 前回使用したウェルへのペナルティで多様な使用を促進
+ * 
+ * 3. 安定性の確保
+ *    - 1グラム未満のウェルは使用不可
+ *    - 容量オーバーを防ぐ厳密なチェック
+ *    - フォールバック処理で必ず操作を実行
+ */
 import java.util.Scanner;
 import java.util.List;
 import java.util.ArrayList;
 
 public class Main {
 
-    // クラスのフィールドとして壁の状態管理配列を定義
-    static boolean[][] verticalWalls;   // verticalWalls[x][y] は (x,y)と(x+1,y)の間の垂直の壁の有無 (true: 壁あり, false: 壁なし)
-    static boolean[][] horizontalWalls; // horizontalWalls[x][y] は (x,y)と(x,y+1)の間の水平の壁の有無 (true: 壁あり, false: 壁なし)
-    static int N_GLOBAL; // Nをstaticで保持するため
-
     public static void main(String[] args) {
         Scanner sc = new Scanner(System.in);
         int N = sc.nextInt(); // パレットの一辺(20 固定)
         int K = sc.nextInt(); // 絵の具の種類数
         int H = sc.nextInt(); // ターゲット色の数(1000 固定)
-        int T_UNUSED = sc.nextInt(); // 最大ターン数（未使用）
-        int D_UNUSED = sc.nextInt(); // 1グラム出すコストD（未使用）
-        N_GLOBAL = N; // Nをstatic変数に保持
+        int T = sc.nextInt(); // 最大ターン数（未使用）
+        int D = sc.nextInt(); // 1グラム出すコストD（未使用）
 
         // 絵の具の色（各RGB成分）を読み込み
         double[][] tubes = new double[K][3];
@@ -33,40 +46,22 @@ public class Main {
             targets[i][2] = sc.nextDouble();
         }
 
-        // --- パレットを2x2のウェルに分割（wellSize=2, N=20で49個） ---
+        // --- パレットを5×5のウェルに分割（wellSize=4, N=20で25個） ---
         int wellSize = 2; // 1ウェルの一辺の長さ
-        int wellsPerRow = (N - 6) / wellSize; // 1行あたりのウェル数（7）
-        int wellCount = wellsPerRow * wellsPerRow; // 全ウェル数（49）
+        int wellsPerRow = (N-6) / wellSize; // 1行あたりのウェル数（5）
+        int wellCount = wellsPerRow * wellsPerRow; // 全ウェル数（25）
 
-        // 壁の状態管理配列の初期化
-        verticalWalls = new boolean[N][N - 1];   // (x,y)と(x+1,y)の間の壁
-        horizontalWalls = new boolean[N - 1][N]; // (x,y)と(x,y+1)の間の壁
-
-        // --- 仕切り出力（2x2分割） & 壁状態の初期化 ---
-        // 垂直方向の仕切り
+        // --- 仕切り出力（5×5分割）---
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < N - 1; j++) {
-                if ((j + 1) % wellSize == 0) { // ウェルの境界線に当たる場合
-                    System.out.print("1");
-                    verticalWalls[i][j] = true; // 壁が存在する
-                } else {
-                    System.out.print("0");
-                    verticalWalls[i][j] = false; // 壁が存在しない
-                }
+                System.out.print(((j + 1) % wellSize == 0) ? "1" : "0");
                 if (j < N - 2) System.out.print(" ");
             }
             System.out.println();
         }
-        // 水平方向の仕切り
         for (int i = 0; i < N - 1; i++) {
             for (int j = 0; j < N; j++) {
-                if ((i + 1) % wellSize == 0) { // ウェルの境界線に当たる場合
-                    System.out.print("1");
-                    horizontalWalls[i][j] = true; // 壁が存在する
-                } else {
-                    System.out.print("0");
-                    horizontalWalls[i][j] = false; // 壁が存在しない
-                }
+                System.out.print(((i + 1) % wellSize == 0) ? "1" : "0");
                 if (j < N - 1) System.out.print(" ");
             }
             System.out.println();
@@ -92,46 +87,75 @@ public class Main {
             }
         }
 
+        // === 機械学習風の重み調整システム ===
+        double[] operationWeights = {1.0, 1.0, 1.0, 1.0}; // [直接納品, 追加注ぎ, 混合, 混合+追加]
+        int[] operationCounts = {0, 0, 0, 0};              // 各操作の実行回数
+        double[] operationSuccessSum = {0.0, 0.0, 0.0, 0.0}; // 各操作の成功度合計
+        double[] operationErrorSum = {0.0, 0.0, 0.0, 0.0};   // 各操作の誤差合計
+        
+        // チューブごとの成功率
+        double[] tubeWeights = new double[K];
+        int[] tubeCounts = new int[K];
+        double[] tubeSuccessSum = new double[K];
+        for (int i = 0; i < K; i++) {
+            tubeWeights[i] = 1.0;
+            tubeCounts[i] = 0;
+            tubeSuccessSum[i] = 0.0;
+        }
+
         int prevWell = -1;
         int[] wellUsed = new int[wellCount];
 
         for (int t = 0; t < H; t++) {
-            // 50ターンごとに全ての開いているウェル境界の壁を再構築（入れる）
+            double minDist = Double.MAX_VALUE;
+            int opType = -1;
+            int bestWell = -1, bestTube = -1;
+            int mixW1 = -1, mixW2 = -1, mixX1 = -1, mixY1 = -1, mixX2 = -1, mixY2 = -1;
+            double[] bestColor = new double[3];
+
+            // === 学習による重み更新（50ターンごと） ===
             if (t > 0 && t % 50 == 0) {
-                // 垂直の壁をチェック
-                for (int i = 0; i < N; i++) {
-                    for (int j = 0; j < N - 1; j++) {
-                        // ウェルを分ける垂直の壁であり、現在開いている場合
-                        if (((j + 1) % wellSize == 0) && !verticalWalls[i][j]) {
-                            toggleWall(i, j, i, j + 1); // 壁を構築 (状態がfalseなのでtrueになる)
+                for (int op = 0; op < 4; op++) {
+                    if (operationCounts[op] > 0) {
+                        double avgSuccess = operationSuccessSum[op] / operationCounts[op];
+                        double avgError = operationErrorSum[op] / operationCounts[op];
+                        
+                        // 成功率が高い操作の重みを増加、低い操作の重みを減少
+                        if (avgError < 0.1) { // 高精度
+                            operationWeights[op] *= 1.1;
+                        } else if (avgError > 0.3) { // 低精度
+                            operationWeights[op] *= 0.95;
                         }
+                        
+                        // 重みの範囲制限
+                        operationWeights[op] = Math.max(0.5, Math.min(2.0, operationWeights[op]));
                     }
                 }
-                // 水平の壁をチェック
-                for (int i = 0; i < N - 1; i++) {
-                    for (int j = 0; j < N; j++) {
-                        // ウェルを分ける水平の壁であり、現在開いている場合
-                        if (((i + 1) % wellSize == 0) && !horizontalWalls[i][j]) {
-                            toggleWall(i, j, i + 1, j); // 壁を構築 (状態がfalseなのでtrueになる)
+                
+                // チューブ重みの更新
+                for (int k = 0; k < K; k++) {
+                    if (tubeCounts[k] > 0) {
+                        double avgTubeSuccess = tubeSuccessSum[k] / tubeCounts[k];
+                        if (avgTubeSuccess < 0.1) {
+                            tubeWeights[k] *= 1.05; // 良いチューブの重みを増加
+                        } else if (avgTubeSuccess > 0.3) {
+                            tubeWeights[k] *= 0.98; // 悪いチューブの重みを減少
                         }
+                        tubeWeights[k] = Math.max(0.7, Math.min(1.5, tubeWeights[k]));
                     }
                 }
             }
 
-            double minDist = Double.MAX_VALUE;
-            int opType = -1; // 0:納品, 1:追加注ぎ, 2:混合, 3:混合+追加注ぎ
-            int bestWell = -1, bestTube = -1;
-            int mixW1 = -1, mixW2 = -1, mixX1 = -1, mixY1 = -1, mixX2 = -1, mixY2 = -1; // 混合操作用のウェルインデックスとピクセル座標
-            double[] bestColor = new double[3]; // 最適な操作後の色
-
-            // 1. 既存ウェルそのまま納品 (opType=0)
+            // 既存ウェルそのまま納品（重み調整適用）
             for (int w = 0; w < wellCount; w++) {
-                if (wellGrams[w] < 1.0) continue; // 1グラム未満のウェルは使用不可
-                
-                double penalty = (w == prevWell) ? 0.05 : 0.0; // 前回と同じウェルを使用する場合のペナルティを低減
-                penalty += 0.01 * wellUsed[w]; // 使用回数が多いウェルにペナルティ（均等使用を促進）
-
+                if (wellGrams[w] < 1.0) continue;
+                double penalty = (w == prevWell) ? 1.0 : 0.0;
+                penalty += 0.02 * wellUsed[w];
                 double dist = colorDist(wellColors[w], targets[t]) + penalty;
+                
+                // 重み調整を適用
+                dist /= operationWeights[0]; // 直接納品の重み
+                
                 if (dist < minDist) {
                     minDist = dist;
                     opType = 0;
@@ -140,18 +164,18 @@ public class Main {
                 }
             }
 
-            // 2. 追加注ぎ (opType=1) (既存ウェルにチューブを追加)
+            // 追加注ぎ（重み調整適用）
             for (int w = 0; w < wellCount; w++) {
-                if (wellGrams[w] < 1.0) continue; // 1グラム未満のウェルは操作対象外
-                if (wellGrams[w] + 1.0 > wellSize * wellSize + 1e-8) continue; // 容量オーバーを防ぐ (誤差考慮)
-
+                if (wellGrams[w] < 1.0 || wellGrams[w] + 1.0 > wellSize * wellSize) continue;
                 for (int k = 0; k < K; k++) {
                     double total = wellGrams[w] + 1.0;
                     double[] mix = new double[3];
                     for (int d = 0; d < 3; d++)
-                        mix[d] = (wellColors[w][d] * wellGrams[w] + tubes[k][d]) / total; // 重み付き平均で色を計算
+                        mix[d] = (wellColors[w][d] * wellGrams[w] + tubes[k][d]) / total;
+                    double dist = colorDist(mix, targets[t]);
                     
-                    double dist = colorDist(mix, targets[t]); // Dコストはここでは評価に含めない (コマンド時に発生)
+                    // 重み調整を適用（操作重み × チューブ重み）
+                    dist /= (operationWeights[1] * tubeWeights[k]);
                     
                     if (dist < minDist) {
                         minDist = dist;
@@ -163,99 +187,87 @@ public class Main {
                 }
             }
 
-            // 3. 混合 (opType=2) および 4. 混合＋追加注ぎ (opType=3)
+            // 混合（重み調整適用）
             for (int w1 = 0; w1 < wellCount; w1++) {
-                if (wellGrams[w1] < 1.0) continue; // 1グラム未満のウェルは操作不可
+                if (wellGrams[w1] < 1.0) continue;
                 for (int w2 = 0; w2 < wellCount; w2++) {
-                    if (w1 == w2 || wellGrams[w2] < 1.0) continue; // 同じウェルは使用不可、または2番目のウェルが1グラム未満
+                    if (w1 == w2 || wellGrams[w2] < 1.0) continue;
+                    double total = wellGrams[w1] + wellGrams[w2];
+                    if (total > wellSize * wellSize) continue;
 
-                    double totalGrams = wellGrams[w1] + wellGrams[w2];
-                    if (totalGrams > wellSize * wellSize + 1e-8) continue; // 容量オーバーチェック (誤差考慮)
+                    boolean isAdjacent = false;
+                    for (int i1 = 0; i1 < wellSize && !isAdjacent; i1++) {
+                        for (int j1 = 0; j1 < wellSize && !isAdjacent; j1++) {
+                            int x1 = wellX[w1] + i1;
+                            int y1 = wellY[w1] + j1;
+                            for (int i2 = 0; i2 < wellSize && !isAdjacent; i2++) {
+                                for (int j2 = 0; j2 < wellSize && !isAdjacent; j2++) {
+                                    int x2 = wellX[w2] + i2;
+                                    int y2 = wellY[w2] + j2;
+                                    if (Math.abs(x1 - x2) + Math.abs(y1 - y2) == 1) {
+                                        isAdjacent = true;
+                                        
+                                        // 混合
+                                        double[] mix = new double[3];
+                                        for (int d = 0; d < 3; d++)
+                                            mix[d] = (wellColors[w1][d] * wellGrams[w1] + wellColors[w2][d] * wellGrams[w2]) / total;
+                                        double dist = colorDist(mix, targets[t]);
+                                        
+                                        // 重み調整を適用
+                                        dist /= operationWeights[2]; // 混合の重み
+                                        
+                                        if (dist < minDist) {
+                                            minDist = dist;
+                                            opType = 2;
+                                            mixW1 = w1; mixW2 = w2;
+                                            mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
+                                            for (int d = 0; d < 3; d++) bestColor[d] = mix[d];
+                                        }
 
-                    // 隣接するウェルのみを考慮 (このコードの意図通り)
-                    // 隣接するウェル間の壁の座標と、壁が存在するかどうかを確認
-                    int targetWallX1 = -1, targetWallY1 = -1, targetWallX2 = -1, targetWallY2 = -1;
-                    boolean isVerticalWall = false;
-                    boolean isHorizontalWall = false;
-
-                    // ウェル1とウェル2の相対位置から壁の座標を特定
-                    int wx1 = wellX[w1] / wellSize; // ウェル1のグリッドX
-                    int wy1 = wellY[w1] / wellSize; // ウェル1のグリッドY
-                    int wx2 = wellX[w2] / wellSize; // ウェル2のグリッドX
-                    int wy2 = wellY[w2] / wellSize; // ウェル2のグリッドY
-
-                    if (Math.abs(wx1 - wx2) == 1 && wy1 == wy2) { // 垂直方向で隣接
-                        isVerticalWall = true;
-                        targetWallX1 = Math.min(wellX[w1], wellX[w2]) + wellSize -1; // 小さい方のXのウェルの右端ピクセル
-                        targetWallY1 = wellY[w1]; // Y座標は同じ
-                        targetWallX2 = targetWallX1 + 1;
-                        targetWallY2 = wellY[w1];
-                    } else if (Math.abs(wy1 - wy2) == 1 && wx1 == wx2) { // 水平方向で隣接
-                        isHorizontalWall = true;
-                        targetWallX1 = wellX[w1]; // X座標は同じ
-                        targetWallY1 = Math.min(wellY[w1], wellY[w2]) + wellSize -1; // 小さい方のYのウェルの下端ピクセル
-                        targetWallX2 = wellX[w1];
-                        targetWallY2 = targetWallY1 + 1;
-                    } else { // 隣接していない場合はスキップ
-                        continue;
-                    }
-                    
-                    // 混合後の色を計算
-                    double[] mixColor = new double[3];
-                    for (int d = 0; d < 3; d++)
-                        mixColor[d] = (wellColors[w1][d] * wellGrams[w1] + wellColors[w2][d] * wellGrams[w2]) / totalGrams;
-                    
-                    // 混合操作 (opType=2)
-                    double distMix = colorDist(mixColor, targets[t]);
-                    if (distMix < minDist) {
-                        minDist = distMix;
-                        opType = 2;
-                        mixW1 = w1; mixW2 = w2;
-                        mixX1 = targetWallX1; mixY1 = targetWallY1; mixX2 = targetWallX2; mixY2 = targetWallY2;
-                        for (int d = 0; d < 3; d++) bestColor[d] = mixColor[d];
-                    }
-
-                    // 混合＋追加注ぎ (opType=3)
-                    for (int k = 0; k < K; k++) {
-                        if (totalGrams + 1.0 > wellSize * wellSize + 1e-8) continue; // 容量チェック
-
-                        double[] mixAdd = new double[3];
-                        for (int d = 0; d < 3; d++)
-                            mixAdd[d] = (mixColor[d] * totalGrams + tubes[k][d]) / (totalGrams + 1.0);
-                        
-                        double distMixAdd = colorDist(mixAdd, targets[t]);
-                        if (distMixAdd < minDist) {
-                            minDist = distMixAdd;
-                            opType = 3;
-                            bestTube = k;
-                            mixW1 = w1; mixW2 = w2;
-                            mixX1 = targetWallX1; mixY1 = targetWallY1; mixX2 = targetWallX2; mixY2 = targetWallY2;
-                            for (int d = 0; d < 3; d++) bestColor[d] = mixAdd[d];
+                                        // 混合＋追加注ぎ
+                                        for (int k = 0; k < K; k++) {
+                                            if (total + 1.0 > wellSize * wellSize) continue;
+                                            double[] mixAdd = new double[3];
+                                            for (int d = 0; d < 3; d++)
+                                                mixAdd[d] = (mix[d] * total + tubes[k][d]) / (total + 1.0);
+                                            double dist2 = colorDist(mixAdd, targets[t]);
+                                            
+                                            // 重み調整を適用（操作重み × チューブ重み）
+                                            dist2 /= (operationWeights[3] * tubeWeights[k]);
+                                            
+                                            if (dist2 < minDist) {
+                                                minDist = dist2;
+                                                opType = 3;
+                                                bestTube = k;
+                                                mixW1 = w1; mixW2 = w2;
+                                                mixX1 = x1; mixY1 = y1; mixX2 = x2; mixY2 = y2;
+                                                for (int d = 0; d < 3; d++) bestColor[d] = mixAdd[d];
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            // 4. 空きウェルへの注ぎ込み (opType=1) (常に評価されるように昇格)
-            // このループは上記2.の追加注ぎのループとは異なる目的で、
-            // 「空のウェルにチューブを注ぐことで、そのウェルを新しい作業スペースとして使う」ことを評価する。
+            // 空きウェルへの注ぎ込み
             for (int w = 0; w < wellCount; w++) {
-                // wellGramsが0に近い（空のウェル）場合のみ対象
-                if (wellGrams[w] < 1e-8) { // 1g未満を空と見なす
-                    int bestTubeIdx = -1;
+                if (wellGrams[w] < 1e-8) {
+                    int bestTubeIdx = 0;
                     double bestTubeDist = Double.MAX_VALUE;
                     for (int k = 0; k < K; k++) {
                         double d = colorDist(tubes[k], targets[t]);
+                        d /= tubeWeights[k]; // チューブ重み適用
                         if (d < bestTubeDist) {
                             bestTubeDist = d;
                             bestTubeIdx = k;
                         }
                     }
-                    
-                    // 空きウェルにベストなチューブを注いだ場合の色差が、現在のminDistより良ければ採用
-                    if (bestTubeIdx != -1 && bestTubeDist < minDist) { // bestTubeIdxが-1でないことを確認
+                    if (bestTubeDist < minDist) {
                         minDist = bestTubeDist;
-                        opType = 1; // ここでは「新規にチューブを注ぎ、納品」を想定
+                        opType = 1;
                         bestWell = w;
                         bestTube = bestTubeIdx;
                         for (int d = 0; d < 3; d++) bestColor[d] = tubes[bestTubeIdx][d];
@@ -263,62 +275,51 @@ public class Main {
                 }
             }
 
+            // === 操作実行と学習データ収集 ===
+            double actualError = colorDist(bestColor, targets[t]); // 実際の誤差
+            
+            // 学習データを蓄積
+            operationCounts[opType]++;
+            operationSuccessSum[opType] += (1.0 - Math.min(1.0, actualError)); // 成功度
+            operationErrorSum[opType] += actualError;
+            
+            if (opType == 1 || opType == 3) { // チューブを使用する操作
+                tubeCounts[bestTube]++;
+                tubeSuccessSum[bestTube] += actualError;
+            }
 
-            // --- 最適な操作の実行と状態更新 ---
-            if (opType == 0) { // そのまま納品
+            // 既存の操作実行部分はそのまま
+            if (opType == 0) {
                 System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
                 wellGrams[bestWell] -= 1.0;
                 prevWell = bestWell;
                 wellUsed[bestWell]++;
-            } else if (opType == 1) { // 追加注ぎ or 空きウェルへの注ぎ込み
-                // Type 1コマンド（チューブを注ぐ）
+            } else if (opType == 1) {
                 System.out.println("1 " + wellX[bestWell] + " " + wellY[bestWell] + " " + bestTube);
-                
-                // 内部状態の更新
-                // bestColor は、注ぎ込んだ後の色になっているはず
                 for (int d = 0; d < 3; d++) wellColors[bestWell][d] = bestColor[d];
                 wellGrams[bestWell] += 1.0;
-
-                // 注ぎ込んだ後、すぐに納品する
                 System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
-                wellGrams[bestWell] -= 1.0; // 納品で1g減る
-                
+                wellGrams[bestWell] -= 1.0;
                 prevWell = bestWell;
                 wellUsed[bestWell]++;
-            } else if (opType == 2) { // 混合
-                // 隣接ウェル間の壁をトグル（破壊/構築）
-                toggleWall(mixX1, mixY1, mixX2, mixY2);
-                
-                // 内部シミュレーションでウェルを結合し色を混合
-                // mixW2 の絵の具が mixW1 に合流する
-                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d]; // bestColorは混合後の色
+            } else if (opType == 2) {
+                System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
+                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
                 wellGrams[mixW1] += wellGrams[mixW2];
-                wellGrams[mixW2] = 0.0; // mixW2 は空になる
-
-                // 納品
+                wellGrams[mixW2] = 0.0;
                 System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
                 wellGrams[mixW1] -= 1.0;
-                
                 prevWell = mixW1;
                 wellUsed[mixW1]++;
-            } else if (opType == 3) { // 混合＋追加注ぎ
-                // 隣接ウェル間の壁をトグル（破壊/構築）
-                toggleWall(mixX1, mixY1, mixX2, mixY2);
-                
-                // 内部シミュレーションでウェルを結合し色を混合
-                // mixW2 の絵の具が mixW1 に合流する
-                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d]; // bestColorは混合+注ぎ後の色
+            } else if (opType == 3) {
+                System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
+                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
                 wellGrams[mixW1] += wellGrams[mixW2];
-                wellGrams[mixW2] = 0.0; // mixW2 は空になる
-
-                // チューブを注ぎ込む
+                wellGrams[mixW2] = 0.0;
                 System.out.println("1 " + wellX[mixW1] + " " + wellY[mixW1] + " " + bestTube);
-                wellGrams[mixW1] += 1.0; // 1g増える
-
-                // 納品
+                wellGrams[mixW1] += 1.0;
                 System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
-                wellGrams[mixW1] -= 1.0; // 納品で1g減る
-                
+                wellGrams[mixW1] -= 1.0;
                 prevWell = mixW1;
                 wellUsed[mixW1]++;
             }
@@ -332,20 +333,5 @@ public class Main {
         double dg = c1[1] - c2[1];
         double db = c1[2] - c2[2];
         return Math.sqrt(dr * dr + dg * dg + db * db);
-    }
-
-    // --- 壁の状態をトグルし、コマンドを出力するヘルパーメソッド ---
-    // (p1x, p1y) と (p2x, p2y) は隣接しているピクセル
-    static void toggleWall(int p1x, int p1y, int p2x, int p2y) {
-        System.out.println("4 " + p1x + " " + p1y + " " + p2x + " " + p2y);
-
-        // 垂直の壁か水平の壁かを判断し、内部状態を更新
-        if (p1x == p2x) { // 水平の壁 (y座標が異なる)
-            // horizontalWalls[x][y] は (x,y)と(x,y+1)の間の壁
-            horizontalWalls[p1x][Math.min(p1y, p2y)] = !horizontalWalls[p1x][Math.min(p1y, p2y)];
-        } else { // 垂直の壁 (x座標が異なる)
-            // verticalWalls[x][y] は (x,y)と(x+1,y)の間の壁
-            verticalWalls[Math.min(p1x, p2x)][p1y] = !verticalWalls[Math.min(p1x, p2x)][p1y];
-        }
     }
 }
