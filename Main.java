@@ -46,43 +46,107 @@ public class Main {
             targets[i][2] = sc.nextDouble();
         }
 
-        // --- パレットを5×5のウェルに分割（wellSize=4, N=20で25個） ---
-        int wellSize = 2; // 1ウェルの一辺の長さ
-        int wellsPerRow = (N-6) / wellSize; // 1行あたりのウェル数（5）
-        int wellCount = wellsPerRow * wellsPerRow; // 全ウェル数（25）
+        // --- コストに応じた詳細な戦略決定 ---
+        int wellSize = 2;
+        int wellsPerRow;
+        int wellCount;
+        double aggressiveFactor = 1.0; // 積極性パラメータ
 
-        // --- 仕切り出力（5×5分割）---
+        if (D <= 2000) {
+            // 超低コスト：最大限活用
+            wellSize = 2;
+            wellsPerRow = N / wellSize;
+            wellCount = wellsPerRow * wellsPerRow;
+            aggressiveFactor = 1.3; // 積極的に混合・操作
+            System.err.println("Ultra low cost mode: " + wellsPerRow + "x" + wellsPerRow + " wells, aggressive=" + aggressiveFactor);
+        } else if (D <= 4000) {
+            // 低コスト：全面活用
+            wellSize = 2;
+            wellsPerRow = N / wellSize;
+            wellCount = wellsPerRow * wellsPerRow;
+            aggressiveFactor = 1.1;
+            System.err.println("Low cost mode: " + wellsPerRow + "x" + wellsPerRow + " wells, aggressive=" + aggressiveFactor);
+        } else if (D <= 6000) {
+            // 中コスト：バランス型
+            wellSize = 2;
+            wellsPerRow = (N-2) / wellSize;
+            wellCount = wellsPerRow * wellsPerRow;
+            aggressiveFactor = 0.9;
+            System.err.println("Medium cost mode: " + wellsPerRow + "x" + wellsPerRow + " wells, aggressive=" + aggressiveFactor);
+        } else {
+            // 高コスト：保守的
+            wellSize = 2;
+            wellsPerRow = (N-4) / wellSize;
+            wellCount = wellsPerRow * wellsPerRow;
+            aggressiveFactor = 0.7; // 保守的
+            System.err.println("High cost mode: " + wellsPerRow + "x" + wellsPerRow + " wells, aggressive=" + aggressiveFactor);
+        }
+
+        // --- 仕切り出力（動的分割）---
         for (int i = 0; i < N; i++) {
             for (int j = 0; j < N - 1; j++) {
-                System.out.print(((j + 1) % wellSize == 0) ? "1" : "0");
+                boolean shouldPartition = false;
+                if (D <= 4000) {
+                    // 低コスト：全面分割
+                    shouldPartition = ((j + 1) % wellSize == 0);
+                } else {
+                    // 高コスト：端1マス除外して分割
+                    if (j >= 1 && j <= N - 3) {
+                        shouldPartition = ((j) % wellSize == 0);
+                    }
+                }
+                System.out.print(shouldPartition ? "1" : "0");
                 if (j < N - 2) System.out.print(" ");
             }
             System.out.println();
         }
+        
         for (int i = 0; i < N - 1; i++) {
             for (int j = 0; j < N; j++) {
-                System.out.print(((i + 1) % wellSize == 0) ? "1" : "0");
+                boolean shouldPartition = false;
+                if (D <= 4000) {
+                    // 低コスト：全面分割
+                    shouldPartition = ((i + 1) % wellSize == 0);
+                } else {
+                    // 高コスト：端1マス除外して分割
+                    if (i >= 1 && i <= N - 3) {
+                        shouldPartition = ((i) % wellSize == 0);
+                    }
+                }
+                System.out.print(shouldPartition ? "1" : "0");
                 if (j < N - 1) System.out.print(" ");
             }
             System.out.println();
         }
 
-        // --- 各ウェルの初期化 ---
+        // --- 各ウェルの初期化（動的配置）---
         double[][] wellColors = new double[wellCount][3]; // 各ウェルの色（RGB）
         int[] wellX = new int[wellCount]; // 各ウェルの左上x座標
         int[] wellY = new int[wellCount]; // 各ウェルの左上y座標
         double[] wellGrams = new double[wellCount]; // 各ウェルのグラム数
+        int[] wellGroup = new int[wellCount]; // ★グループ管理を追加
+        
         int idx = 0;
         for (int wy = 0; wy < wellsPerRow; wy++) {
             for (int wx = 0; wx < wellsPerRow; wx++) {
-                int x = wx * wellSize;
-                int y = wy * wellSize;
+                int x, y;
+                if (D <= 4000) {
+                    // 低コスト：(0,0)から開始
+                    x = wx * wellSize;
+                    y = wy * wellSize;
+                } else {
+                    // 高コスト：(1,1)から開始（端を1マス空ける）
+                    x = 1 + wx * wellSize;
+                    y = 1 + wy * wellSize;
+                }
+                
                 int tubeIdx = idx % K;
                 System.out.println("1 " + x + " " + y + " " + tubeIdx);
                 for (int d = 0; d < 3; d++) wellColors[idx][d] = tubes[tubeIdx][d];
                 wellX[idx] = x;
                 wellY[idx] = y;
                 wellGrams[idx] = 1.0;
+                wellGroup[idx] = idx; // ★初期状態では各ウェルが独立グループ
                 idx++;
             }
         }
@@ -192,6 +256,8 @@ public class Main {
                 if (wellGrams[w1] < 1.0) continue;
                 for (int w2 = 0; w2 < wellCount; w2++) {
                     if (w1 == w2 || wellGrams[w2] < 1.0) continue;
+                    if (wellGroup[w1] == wellGroup[w2]) continue; // ★同じグループは混合しない
+                    
                     double total = wellGrams[w1] + wellGrams[w2];
                     if (total > wellSize * wellSize) continue;
 
@@ -288,38 +354,164 @@ public class Main {
                 tubeSuccessSum[bestTube] += actualError;
             }
 
-            // 既存の操作実行部分はそのまま
+            // === デバッグ用ウェル状態表示（10ターンごと） ===
+            if (t % 10 == 0 || t < 5) {
+                System.err.println("=== Turn " + t + " ===");
+                System.err.println("Operation: " + opType + " (0:direct, 1:add, 2:mix, 3:mix+add)");
+                System.err.println("Target Error: " + String.format("%.4f", actualError));
+                
+                // ウェルのグラム数表示（5×5グリッド形式）
+                System.err.println("Well Grams:");
+                for (int wy = 0; wy < wellsPerRow; wy++) {
+                    for (int wx = 0; wx < wellsPerRow; wx++) {
+                        int w = wy * wellsPerRow + wx;
+                        System.err.printf("%5.2f ", wellGrams[w]);
+                    }
+                    System.err.println();
+                }
+                
+                // 統計情報
+                int validWells = 0;
+                int emptyWells = 0;
+                double totalGrams = 0.0;
+                double minGrams = Double.MAX_VALUE;
+                double maxGrams = 0.0;
+                
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGrams[w] >= 1.0) validWells++;
+                    if (wellGrams[w] < 0.1) emptyWells++;
+                    totalGrams += wellGrams[w];
+                    if (wellGrams[w] > 0) {
+                        minGrams = Math.min(minGrams, wellGrams[w]);
+                        maxGrams = Math.max(maxGrams, wellGrams[w]);
+                    }
+                }
+                
+                System.err.println("Stats: Valid=" + validWells + " Empty=" + emptyWells + 
+                                 " Total=" + String.format("%.2f", totalGrams) + 
+                                 " Min=" + String.format("%.3f", minGrams == Double.MAX_VALUE ? 0 : minGrams) + 
+                                 " Max=" + String.format("%.2f", maxGrams));
+                System.err.println();
+            }
+
+            // === 正しいグループベースの操作実行 ===
             if (opType == 0) {
                 System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
-                wellGrams[bestWell] -= 1.0;
+                
+                // ★同じグループのすべてのウェルからグラム数を減らす
+                int targetGroup = wellGroup[bestWell];
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGroup[w] == targetGroup) {
+                        wellGrams[w] -= 1.0;
+                        if (wellGrams[w] < 1e-9) wellGrams[w] = 0.0;
+                    }
+                }
+                
                 prevWell = bestWell;
                 wellUsed[bestWell]++;
+                
             } else if (opType == 1) {
                 System.out.println("1 " + wellX[bestWell] + " " + wellY[bestWell] + " " + bestTube);
-                for (int d = 0; d < 3; d++) wellColors[bestWell][d] = bestColor[d];
-                wellGrams[bestWell] += 1.0;
+                
+                // ★同じグループのすべてのウェルの色とグラム数を更新
+                int targetGroup = wellGroup[bestWell];
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGroup[w] == targetGroup) {
+                        for (int d = 0; d < 3; d++) wellColors[w][d] = bestColor[d];
+                        wellGrams[w] += 1.0;
+                    }
+                }
+                
                 System.out.println("2 " + wellX[bestWell] + " " + wellY[bestWell]);
-                wellGrams[bestWell] -= 1.0;
+                
+                // ★同じグループのすべてのウェルからグラム数を減らす
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGroup[w] == targetGroup) {
+                        wellGrams[w] -= 1.0;
+                        if (wellGrams[w] < 1e-9) wellGrams[w] = 0.0;
+                    }
+                }
+                
                 prevWell = bestWell;
                 wellUsed[bestWell]++;
+                
             } else if (opType == 2) {
                 System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
-                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
-                wellGrams[mixW1] += wellGrams[mixW2];
-                wellGrams[mixW2] = 0.0;
+                
+                // ★グループ統合処理
+                double originalW1Grams = wellGrams[mixW1];
+                double originalW2Grams = wellGrams[mixW2];
+                int oldGroup = wellGroup[mixW2];
+                int newGroup = wellGroup[mixW1];
+                
+                // ★w2のグループをw1のグループに統合
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGroup[w] == oldGroup) {
+                        wellGroup[w] = newGroup;
+                    }
+                }
+                
+                double mixedTotalGrams = originalW1Grams + originalW2Grams;
+                
+                // ★混合後の色とグラム数を同じグループ全体に設定
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGroup[w] == newGroup) {
+                        for (int d = 0; d < 3; d++) wellColors[w][d] = bestColor[d];
+                        wellGrams[w] = mixedTotalGrams;
+                    }
+                }
+                
                 System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
-                wellGrams[mixW1] -= 1.0;
+                
+                // ★納品後のグラム数を同じグループ全体から減らす
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGroup[w] == newGroup) {
+                        wellGrams[w] -= 1.0;
+                        if (wellGrams[w] < 1e-9) wellGrams[w] = 0.0;
+                    }
+                }
+                
                 prevWell = mixW1;
                 wellUsed[mixW1]++;
+                
             } else if (opType == 3) {
                 System.out.println("4 " + mixX1 + " " + mixY1 + " " + mixX2 + " " + mixY2);
-                for (int d = 0; d < 3; d++) wellColors[mixW1][d] = bestColor[d];
-                wellGrams[mixW1] += wellGrams[mixW2];
-                wellGrams[mixW2] = 0.0;
+                
+                // ★グループ統合処理
+                double originalW1Grams = wellGrams[mixW1];
+                double originalW2Grams = wellGrams[mixW2];
+                int oldGroup = wellGroup[mixW2];
+                int newGroup = wellGroup[mixW1];
+                
+                // ★w2のグループをw1のグループに統合
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGroup[w] == oldGroup) {
+                        wellGroup[w] = newGroup;
+                    }
+                }
+                
                 System.out.println("1 " + wellX[mixW1] + " " + wellY[mixW1] + " " + bestTube);
-                wellGrams[mixW1] += 1.0;
+                
+                double mixAddTotalGrams = originalW1Grams + originalW2Grams + 1.0;
+                
+                // ★混合+追加後の色とグラム数を同じグループ全体に設定
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGroup[w] == newGroup) {
+                        for (int d = 0; d < 3; d++) wellColors[w][d] = bestColor[d];
+                        wellGrams[w] = mixAddTotalGrams;
+                    }
+                }
+                
                 System.out.println("2 " + wellX[mixW1] + " " + wellY[mixW1]);
-                wellGrams[mixW1] -= 1.0;
+                
+                // ★納品後のグラム数を同じグループ全体から減らす
+                for (int w = 0; w < wellCount; w++) {
+                    if (wellGroup[w] == newGroup) {
+                        wellGrams[w] -= 1.0;
+                        if (wellGrams[w] < 1e-9) wellGrams[w] = 0.0;
+                    }
+                }
+                
                 prevWell = mixW1;
                 wellUsed[mixW1]++;
             }
